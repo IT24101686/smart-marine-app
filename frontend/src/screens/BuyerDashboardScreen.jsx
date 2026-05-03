@@ -93,35 +93,18 @@ const BuyerDashboardScreen = ({ navigation }) => {
 
     const fetchAvailableCatches = async (district) => {
         try {
+            // Backend now returns enriched data: catchSummary + fishPrices + estimatedValue
             const response = await client.get(`/api/trips/market/all?district=${district}`);
             const data = Array.isArray(response.data) ? response.data : [];
-            
-            // Available: Completed but NOT yet sold (Backend already filtered by district)
+
             const available = data.filter(t => t.status === 'completed');
-            
-            // My Stock: Sold to ME (logged in user)
-            const bought = data.filter(t => t.status === 'sold' && t.buyerId?._id === user?._id);
+            const bought    = data.filter(t => t.status === 'sold' && t.buyerId === user?._id);
 
-            const [availableWithSummary, boughtWithSummary] = await Promise.all([
-                Promise.all(available.map(async (trip) => {
-                    try {
-                        const summaryRes = await client.get(`/api/trips/${trip._id}/summary`);
-                        return { ...trip, summary: summaryRes.data };
-                    } catch (e) { return { ...trip }; }
-                })),
-                Promise.all(bought.map(async (trip) => {
-                    try {
-                        const summaryRes = await client.get(`/api/trips/${trip._id}/summary`);
-                        return { ...trip, summary: summaryRes.data };
-                    } catch (e) { return { ...trip }; }
-                }))
-            ]);
-
-            setAvailableCatches(availableWithSummary);
-            setFilteredCatches(availableWithSummary);
-            setMyStock(boughtWithSummary);
+            setAvailableCatches(available);
+            setFilteredCatches(available);
+            setMyStock(bought);
         } catch (error) {
-            console.error("Fetch catches error:", error);
+            console.error('Fetch catches error:', error);
         } finally {
             setLoading(false);
         }
@@ -132,56 +115,52 @@ const BuyerDashboardScreen = ({ navigation }) => {
         if (selectedType === 'All') {
             setFilteredCatches(availableCatches);
         } else {
+            // Filter using catchSummary.catchBreakdown from the enriched response
             const filtered = availableCatches.filter(trip =>
-                trip.summary && trip.summary.catchBreakdown && trip.summary.catchBreakdown[selectedType]
+                trip.catchSummary?.catchBreakdown?.[selectedType]
             );
             setFilteredCatches(filtered);
         }
     }, [selectedType, availableCatches]);
 
 
+    // Uses TripFishPrice (fishPrices) embedded by backend — pricePerKg × sellable weight
     const calculateTotalPrice = (item) => {
-        const summary = item.summary;
-        if (!summary || !summary.catchBreakdownDetails) return 0;
+        // Use the pre-computed estimatedValue from the backend if available
+        if (item.estimatedValue && item.estimatedValue > 0) return item.estimatedValue;
+
+        // Fallback: compute locally using fishPrices + catchSummary
+        const breakdown = item.catchSummary?.catchBreakdown || {};
+        const prices    = item.fishPrices || [];
+        if (prices.length === 0 || Object.keys(breakdown).length === 0) return 0;
 
         let total = 0;
-
-        // If the Planner has set custom prices for this trip
-        if (item.customPrices && item.customPrices.length > 0) {
-            item.customPrices.forEach(cp => {
-                const details = summary.catchBreakdownDetails[cp.fishType];
-                if (details) {
-                    total += (details.gradeA || 0) * (cp.priceA || 0);
-                    total += (details.gradeB || 0) * (cp.priceB || 0);
-                }
-            });
-        } else {
-            // Fallback to market rates if no custom prices
-            Object.keys(summary.catchBreakdownDetails).forEach(fishType => {
-                const details = summary.catchBreakdownDetails[fishType];
-                const rate = marketRates.find(r => r.fishType === fishType) || marketRates[0];
-                
-                total += (details.gradeA || 0) * (rate?.gradeAPrice || 1500);
-                total += (details.gradeB || 0) * (rate?.gradeBPrice || 1000);
-            });
-        }
-
+        prices.forEach(p => {
+            const b = breakdown[p.fishType];
+            if (b) total += ((b.gradeA || 0) + (b.gradeB || 0)) * (p.pricePerKg || 0);
+        });
         return total;
     };
 
     const handleBuy = async (tripId, totalPrice) => {
         try {
             setLoading(true);
-            const response = await client.post(`/api/trips/${tripId}/buy`, { totalPrice });
+            await client.post(`/api/trips/${tripId}/buy`, { totalPrice });
+
+            // ── Immediately remove from list so it disappears without waiting for OK ──
+            setAvailableCatches(prev => prev.filter(t => t._id !== tripId));
+            setFilteredCatches(prev => prev.filter(t => t._id !== tripId));
+
             Alert.alert(
-                "Payment Successful!", 
-                "The transaction is complete. The earnings have been distributed to the Vessel Owner, Trip Planner, and Crew members.",
+                "Payment Successful! 🎉",
+                "The transaction is complete. Earnings have been distributed to the Vessel Owner, Trip Planner, and Crew.",
                 [{ text: "OK", onPress: () => loadUserAndCatches() }]
             );
         } catch (error) {
-            setLoading(false);
             console.error(error);
             Alert.alert("Error", error.response?.data?.message || "Payment failed");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -205,43 +184,83 @@ const BuyerDashboardScreen = ({ navigation }) => {
     const renderCatchCard = ({ item }) => {
         if (!item || !item._id) return null;
 
-        const vesselName = item.vesselId?.name || "Unknown Vessel";
-        const district = item.plannerId?.district || "Unknown";
+        const vesselName  = item.vesselId?.name      || 'Unknown Vessel';
+        const district    = item.plannerId?.district  || 'Unknown';
+        const summary     = item.catchSummary         || {};
+        const fishPrices  = item.fishPrices           || [];
+        const breakdown   = summary.catchBreakdown    || {};
+        const totalValue  = calculateTotalPrice(item);
+        const hasPhoots   = item.catches?.some(c => c.photos?.length > 0);
 
         return (
             <View style={styles.catchCard}>
 
+                {/* ── Header ── */}
                 <View style={styles.cardHeader}>
                     <View>
                         <Text style={styles.vesselName}>{vesselName}</Text>
-                        <Text style={styles.harborName}>{district} Harbor</Text>
+                        <Text style={styles.harborName}>
+                            <Ionicons name="location-outline" size={12} color="#64748b" /> {district} Harbor
+                        </Text>
                     </View>
-
                     <View style={styles.freshBadge}>
                         <Text style={styles.freshText}>FRESH ARRIVAL</Text>
                     </View>
                 </View>
 
+                {/* ── Grade totals ── */}
                 <View style={styles.statsRow}>
                     <View style={styles.statItem}>
-                        <Text style={styles.statLabel}>Grade A (Premium)</Text>
-                        <Text style={[styles.statValue, { color: '#22c55e' }]}>
-                            {(item.summary?.supermarketStock || 0).toFixed(1)} kg
+                        <Text style={styles.statLabel}>Total Weight</Text>
+                        <Text style={[styles.statValue, { color: '#1e293b' }]}>
+                            {(summary.totalWeight || 0).toFixed(1)} kg
                         </Text>
                     </View>
                     <View style={styles.divider} />
                     <View style={styles.statItem}>
-                        <Text style={styles.statLabel}>Grade B (Standard)</Text>
+                        <Text style={styles.statLabel}>Grade A 🟢</Text>
+                        <Text style={[styles.statValue, { color: '#22c55e' }]}>
+                            {(summary.gradeAWeight || 0).toFixed(1)} kg
+                        </Text>
+                    </View>
+                    <View style={styles.divider} />
+                    <View style={styles.statItem}>
+                        <Text style={styles.statLabel}>Grade B 🔵</Text>
                         <Text style={[styles.statValue, { color: '#3b82f6' }]}>
-                            {(item.summary?.customerStock || 0).toFixed(1)} kg
+                            {(summary.gradeBWeight || 0).toFixed(1)} kg
                         </Text>
                     </View>
                 </View>
 
-                {/* Catch Photos Section */}
-                {item.catches && item.catches.some(c => c.photos && c.photos.length > 0) && (
+                {/* ── Per fish-type price breakdown ── */}
+                {fishPrices.length > 0 && (
+                    <View style={styles.priceBreakdownBox}>
+                        <Text style={styles.priceBreakdownTitle}>🏷️ Planner Selling Prices</Text>
+                        {fishPrices.map((p, i) => {
+                            const b = breakdown[p.fishType] || {};
+                            const sellKg = (b.gradeA || 0) + (b.gradeB || 0);
+                            const lineVal = sellKg * (p.pricePerKg || 0);
+                            return (
+                                <View key={i} style={styles.priceBreakdownRow}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.priceBreakdownFish}>{p.fishType}</Text>
+                                        <Text style={styles.priceBreakdownSub}>
+                                            {sellKg.toFixed(1)} kg × LKR {Math.round(p.pricePerKg).toLocaleString()}/kg
+                                        </Text>
+                                    </View>
+                                    <Text style={styles.priceBreakdownVal}>
+                                        LKR {Math.round(lineVal).toLocaleString()}
+                                    </Text>
+                                </View>
+                            );
+                        })}
+                    </View>
+                )}
+
+                {/* ── Catch photos ── */}
+                {hasPhoots && (
                     <View style={styles.photoSection}>
-                        <Text style={styles.photoLabel}>Catch Photos (Fisherman Update):</Text>
+                        <Text style={styles.photoLabel}>📸 Catch Photos:</Text>
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoScroll}>
                             {item.catches.flatMap(c => c.photos || []).map((photo, idx) => (
                                 <Image key={idx} source={{ uri: photo }} style={styles.catchImage} />
@@ -250,19 +269,24 @@ const BuyerDashboardScreen = ({ navigation }) => {
                     </View>
                 )}
 
+                {/* ── Total value ── */}
                 <View style={styles.priceSection}>
-                    <Text style={styles.priceLabel}>Estimated Total Catch Value:</Text>
-                    <Text style={styles.priceValue}>LKR {calculateTotalPrice(item).toLocaleString()}</Text>
+                    <Text style={styles.priceLabel}>
+                        {fishPrices.length > 0 ? 'Total Catch Value (Planner Prices)' : 'Estimated Catch Value'}
+                    </Text>
+                    <Text style={styles.priceValue}>LKR {Math.round(totalValue).toLocaleString()}</Text>
                 </View>
 
+                {/* ── Actions ── */}
                 <View style={styles.actionButtons}>
-
                     <TouchableOpacity
                         style={[styles.actionBtn, styles.locationBtn]}
                         onPress={() => setExpandedMapId(expandedMapId === item._id ? null : item._id)}
                     >
-                        <Ionicons name={expandedMapId === item._id ? "close" : "location-outline"} size={20} color="#2563eb" />
-                        <Text style={styles.locationBtnText}>{expandedMapId === item._id ? "Hide Map" : "View Logistics"}</Text>
+                        <Ionicons name={expandedMapId === item._id ? 'close' : 'location-outline'} size={20} color="#2563eb" />
+                        <Text style={styles.locationBtnText}>
+                            {expandedMapId === item._id ? 'Hide Map' : 'Logistics'}
+                        </Text>
                     </TouchableOpacity>
 
                     {item.status !== 'sold' && (
@@ -270,7 +294,7 @@ const BuyerDashboardScreen = ({ navigation }) => {
                             style={[styles.actionBtn, styles.buyBtn]}
                             onPress={() => handlePurchaseRequest(item)}
                         >
-                            <Text style={styles.buyBtnText}>Pay Now</Text>
+                            <Text style={styles.buyBtnText}>Buy Now</Text>
                             <Ionicons name="card-outline" size={20} color="#fff" />
                         </TouchableOpacity>
                     )}
@@ -278,12 +302,12 @@ const BuyerDashboardScreen = ({ navigation }) => {
 
                 {expandedMapId === item._id && (
                     <View style={styles.mapContainer}>
-                        <MapComponent 
-                            address1={item.plannerId?.address || `${item.plannerId?.district || 'Galle'} Harbor`} 
+                        <MapComponent
+                            address1={item.plannerId?.address || `${district} Harbor`}
                             address2={item.status === 'sold' ? user?.address : null}
                         />
                         {item.status === 'sold' && (
-                            <Text style={styles.routeNote}>Dashed line shows the route to your location</Text>
+                            <Text style={styles.routeNote}>Dashed line shows route to your location</Text>
                         )}
                     </View>
                 )}
@@ -369,8 +393,8 @@ const BuyerDashboardScreen = ({ navigation }) => {
                                     <Text style={styles.sectionTitle}>My Bought Stock (මගේ තොග)</Text>
                                     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.stockScroll}>
                                         {myStock.map((trip) => (
-                                            <TouchableOpacity 
-                                                key={trip._id} 
+                                            <TouchableOpacity
+                                                key={trip._id}
                                                 style={styles.stockMiniCard}
                                                 onPress={() => navigation.navigate('TripSummary', { tripId: trip._id })}
                                             >
@@ -379,7 +403,7 @@ const BuyerDashboardScreen = ({ navigation }) => {
                                                     <Text style={styles.miniVesselName}>{trip.vesselId?.name}</Text>
                                                 </View>
                                                 <Text style={styles.miniStockWeight}>
-                                                    Total: {(trip.summary?.totalWeight || 0).toFixed(1)} kg
+                                                    Total: {(trip.catchSummary?.totalWeight || 0).toFixed(1)} kg
                                                 </Text>
                                                 <View style={styles.manageLabel}>
                                                     <Text style={styles.manageLabelText}>View Summary</Text>
@@ -1027,6 +1051,47 @@ const styles = StyleSheet.create({
         fontSize: 16,
         fontWeight: '900',
         color: '#22c55e',
+    },
+    // ── Price breakdown styles ──────────────────────────────
+    priceBreakdownBox: {
+        marginTop: 14,
+        backgroundColor: '#f0fdf4',
+        borderRadius: 16,
+        padding: 14,
+        borderWidth: 1,
+        borderColor: '#bbf7d0',
+    },
+    priceBreakdownTitle: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#166534',
+        marginBottom: 10,
+        textTransform: 'uppercase',
+        letterSpacing: 0.5,
+    },
+    priceBreakdownRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: '#dcfce7',
+    },
+    priceBreakdownFish: {
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#1e293b',
+    },
+    priceBreakdownSub: {
+        fontSize: 11,
+        color: '#64748b',
+        fontWeight: '500',
+        marginTop: 2,
+    },
+    priceBreakdownVal: {
+        fontSize: 14,
+        fontWeight: '900',
+        color: '#166534',
     },
 });
 
