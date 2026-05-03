@@ -211,7 +211,7 @@ const RentalDashboardScreen = ({ navigation }) => {
                                                         size={20} 
                                                         color={trip.status === 'ongoing' ? "#ef4444" : trip.status === 'completed' ? "#eab308" : "#2563eb"} 
                                                     />
-                                                    <Text style={styles.miniVesselName}>{trip.vesselId?.name}</Text>
+                                                    <Text style={styles.miniVesselName}>{trip.vesselId?.name || 'Unknown Vessel'}</Text>
                                                 </View>
                                                 <Text style={styles.miniCrewStatus}>
                                                     {trip.status === 'ongoing' ? "LIVE: At Sea" : trip.status === 'completed' ? "Awaiting Market Prices" : `${trip.crew?.length} / ${trip.maxFishermen} Crew Joined`}
@@ -392,6 +392,12 @@ const styles = StyleSheet.create({
         color: '#94a3b8',
         fontWeight: '600',
         textAlign: 'center',
+    },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        color: '#1e293b',
+        marginHorizontal: 4,
     },
     myTripsSection: {
         marginBottom: 20,

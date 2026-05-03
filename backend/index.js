@@ -9,6 +9,7 @@ import marketRoutes from './routes/marketRoutes.js';
 import orderRoutes from './routes/orderRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js';
+import fishPriceRoutes from './routes/fishPriceRoutes.js';
 import { seedRates } from './controllers/marketRateController.js';
 import dns from "node:dns/promises";
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -32,6 +33,7 @@ app.use('/api/market-rates', marketRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/fish-prices', fishPriceRoutes);
 
 
 

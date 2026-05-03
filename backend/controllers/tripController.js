@@ -393,9 +393,10 @@ export const approveFisherman = async (req, res) => {
 export const getTripDetails = async (req, res) => {
     try {
         const trip = await Trip.findById(req.params.id)
-            .populate('vesselId', 'name licenseNumber image')
+            .populate('vesselId', 'name licenseNumber image vesselType')
             .populate('crew', 'name phone profileImage district')
-            .populate('requests', 'name phone profileImage district');
+            .populate('requests', 'name phone profileImage district')
+            .populate('catches');
         res.status(200).json(trip);
     } catch (error) {
         res.status(500).json({ message: error.message });
