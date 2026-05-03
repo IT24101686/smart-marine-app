@@ -7,357 +7,69 @@ import {
     TouchableOpacity, 
     ActivityIndicator,
     Alert,
-    Dimensions,
-    TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import client from '../api/client';
 
-const { width } = Dimensions.get('window');
+const fmt = (n) => {
+    if (n == null || isNaN(n)) return '0';
+    return Math.round(n).toLocaleString();
+};
+const fmtKg = (n) => (n == null ? '0' : Number(n).toFixed(1));
 
 const TripSummaryScreen = ({ route, navigation }) => {
     const { tripId } = route.params;
-    const [summary, setSummary] = useState(null);
+    const [summary, setSummary]   = useState(null);
     const [finances, setFinances] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [prices, setPrices] = useState([]); // Array of { fishType, priceA, priceB }
-    const [isUpdatingPrices, setIsUpdatingPrices] = useState(false);
-
-    const fetchFinances = async () => {
-        const financeRes = await client.get(`/api/trips/${tripId}/finances`);
-        setFinances(financeRes.data);
-    };
+    const [loading, setLoading]   = useState(true);
 
     useEffect(() => {
-        const loadAllData = async () => {
-            setLoading(true);
-            try {
-                const summaryRes = await client.get(`/api/trips/${tripId}/summary`);
-                setSummary(summaryRes.data);
-                
-                // Load trip details to get existing custom prices
-                const tripDetailsRes = await client.get(`/api/trips/${tripId}`);
-                const tripData = tripDetailsRes.data;
-                
-                // Initialize prices from trip data or summary breakdown
-                if (tripData.customPrices && tripData.customPrices.length > 0) {
-                    setPrices(tripData.customPrices);
-                } else {
-                    const initialPrices = Object.keys(summaryRes.data.catchBreakdownDetails || {}).map(type => ({
-                        fishType: type,
-                        priceA: 1500,
-                        priceB: 1000
-                    }));
-                    setPrices(initialPrices);
-                }
-
-                await fetchFinances();
-            } catch (error) {
-                console.error(error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        loadAllData();
+        loadAll();
     }, [tripId]);
 
-    const handleCancelTrip = async () => {
-        Alert.alert(
-            "Cancel Trip",
-            "Are you sure you want to cancel this planned trip? This action cannot be undone.",
-            [
-                { text: "No", style: "cancel" },
-                { 
-                    text: "Yes, Cancel Trip", 
-                    style: "destructive",
-                    onPress: async () => {
-                        try {
-                            await client.delete(`/api/trips/${tripId}`);
-                            Alert.alert("Success", "Trip cancelled");
-                            navigation.navigate('Home');
-                        } catch (error) {
-                            Alert.alert("Error", "Failed to cancel trip");
-                        }
-                    }
-                }
-            ]
-        );
+    const loadAll = async () => {
+        setLoading(true);
+        try {
+            const [sumRes, finRes] = await Promise.all([
+                client.get(`/api/trips/${tripId}/summary`),
+                client.get(`/api/trips/${tripId}/finances`),
+            ]);
+            setSummary(sumRes.data);
+            setFinances(finRes.data);
+        } catch (error) {
+            console.error('TripSummary load error:', error);
+            Alert.alert('Error', 'Could not load trip data');
+        } finally {
+            setLoading(false);
+        }
     };
 
-    const handleRemoveCrew = async (userId, name) => {
-        Alert.alert(
-            "Remove Crew Member",
-            `Are you sure you want to remove ${name} from this trip?`,
-            [
-                { text: "Cancel", style: "cancel" },
-                { 
-                    text: "Remove", 
-                    style: "destructive",
-                    onPress: async () => {
-                        try {
-                            await client.delete(`/api/trips/${tripId}/crew/${userId}`);
-                            Alert.alert("Success", "Crew member removed");
-                            const summaryRes = await client.get(`/api/trips/${tripId}/summary`);
-                            setSummary(summaryRes.data);
-                        } catch (error) {
-                            Alert.alert("Error", "Failed to remove crew member");
-                        }
-                    }
-                }
-            ]
-        );
-    };
-
-    const renderCrewManagement = () => {
-        if (summary?.status !== 'planned') return null;
-
-        return (
-            <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                    <Ionicons name="people-outline" size={24} color="#2563eb" />
-                    <Text style={styles.sectionTitle}>Crew Management</Text>
-                </View>
-                {summary.crew?.map((member) => (
-                    <View key={member._id} style={styles.crewMemberRow}>
-                        <Text style={styles.memberName}>{member.name}</Text>
-                        <TouchableOpacity 
-                            style={styles.removeBtn} 
-                            onPress={() => handleRemoveCrew(member._id, member.name)}
-                        >
-                            <Ionicons name="close-circle" size={20} color="#ef4444" />
-                        </TouchableOpacity>
-                    </View>
-                ))}
-                {summary.crew?.length === 0 && <Text style={styles.emptyText}>No crew members yet.</Text>}
-            </View>
-        );
-    };
-
+    // ── Sell Grade C ──────────────────────────────────────────
     const handleSellGradeC = () => {
         Alert.prompt(
-            "Sell Grade C Stock",
-            "Enter total revenue received from dry fish/industrial buyers (LKR):",
+            'Sell Grade C Stock',
+            'Enter total revenue received from dry fish / industrial buyers (LKR):',
             [
-                { text: "Cancel", style: "cancel" },
+                { text: 'Cancel', style: 'cancel' },
                 {
-                    text: "Record Sale",
+                    text: 'Record Sale',
                     onPress: async (revenue) => {
                         try {
-                            await client.post(`/api/trips/${tripId}/sell-grade-c`, { revenue: parseFloat(revenue) });
-                            Alert.alert("Success", "Grade C sale recorded!");
-                            fetchFinances(); // Refresh financials
-                        } catch (error) {
-                            Alert.alert("Error", "Failed to record sale");
+                            await client.post(`/api/trips/${tripId}/sell-grade-c`, {
+                                revenue: parseFloat(revenue) || 0,
+                            });
+                            Alert.alert('Success', 'Grade C sale recorded!');
+                            loadAll();
+                        } catch (e) {
+                            Alert.alert('Error', 'Failed to record sale');
                         }
-                    }
-                }
+                    },
+                },
             ],
-            "plain-text",
-            "5000"
-        );
-    };
-
-
-    const handleUpdatePrice = (fishType, field, value) => {
-        setPrices(prev => prev.map(p => 
-            p.fishType === fishType ? { ...p, [field]: parseFloat(value) || 0 } : p
-        ));
-    };
-
-    const savePrices = async () => {
-        try {
-            setIsUpdatingPrices(true);
-            await client.put(`/api/trips/${tripId}/prices`, { customPrices: prices });
-            Alert.alert("Success", "Asking prices set for this trip!");
-        } catch (error) {
-            Alert.alert("Error", "Failed to save prices");
-        } finally {
-            setIsUpdatingPrices(false);
-        }
-    };
-
-    const renderPriceSettings = () => {
-        if (summary?.status !== 'completed') return null;
-
-        return (
-            <View style={[styles.section, { borderColor: '#2563eb', borderHalfWidth: 2 }]}>
-                <View style={styles.sectionHeader}>
-                    <View style={[styles.iconCircle, { backgroundColor: '#dbeafe' }]}>
-                        <Ionicons name="pricetags" size={20} color="#2563eb" />
-                    </View>
-                    <View>
-                        <Text style={[styles.sectionTitle, { color: '#1e3a8a' }]}>Set Wholesale Prices 🏷️</Text>
-                        <Text style={styles.sectionSub}>Decide your selling price for District Buyers</Text>
-                    </View>
-                </View>
-
-                {prices.length > 0 ? prices.map((p, idx) => (
-                    <View key={idx} style={styles.priceSettingCard}>
-                        <View style={styles.priceCardHeader}>
-                            <Text style={styles.fishTypeName}>{p.fishType}</Text>
-                            <View style={styles.activeTag}>
-                                <Text style={styles.activeTagText}>Editing</Text>
-                            </View>
-                        </View>
-                        <View style={styles.priceRowInputs}>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Grade A (රු./kg)</Text>
-                                <TextInput 
-                                    style={styles.priceInput}
-                                    keyboardType="numeric"
-                                    value={p.priceA.toString()}
-                                    onChangeText={(val) => handleUpdatePrice(p.fishType, 'priceA', val)}
-                                />
-                            </View>
-                            <View style={styles.inputGroup}>
-                                <Text style={styles.inputLabel}>Grade B (රු./kg)</Text>
-                                <TextInput 
-                                    style={styles.priceInput}
-                                    keyboardType="numeric"
-                                    value={p.priceB.toString()}
-                                    onChangeText={(val) => handleUpdatePrice(p.fishType, 'priceB', val)}
-                                />
-                            </View>
-                        </View>
-                    </View>
-                )) : (
-                    <View style={styles.noCatchBox}>
-                        <Text style={styles.noCatchText}>Processing catch breakdown... Please wait.</Text>
-                    </View>
-                )}
-
-                <TouchableOpacity 
-                    style={[styles.savePricesBtn, isUpdatingPrices && { opacity: 0.7 }]} 
-                    onPress={savePrices}
-                    disabled={isUpdatingPrices}
-                >
-                    {isUpdatingPrices ? (
-                        <ActivityIndicator color="#fff" />
-                    ) : (
-                        <>
-                            <Ionicons name="megaphone-outline" size={20} color="#fff" />
-                            <Text style={styles.savePricesText}>Confirm & Post to Market</Text>
-                        </>
-                    )}
-                </TouchableOpacity>
-                <Text style={styles.disclaimerText}>
-                    * Once posted, these prices will be visible to District Buyers for wholesale purchase.
-                </Text>
-            </View>
-        );
-    };
-    const renderGradeCSection = () => {
-        const wasteWeight = summary?.wasteProduct || 0;
-        if (wasteWeight === 0) return null;
-
-        return (
-            <View style={[styles.section, { borderLeftWidth: 5, borderLeftColor: '#f59e0b' }]}>
-                <View style={styles.sectionHeader}>
-                    <Ionicons name="trash-outline" size={24} color="#f59e0b" />
-                    <Text style={styles.sectionTitle}>Grade C (Waste/Industrial)</Text>
-                </View>
-                
-                <Text style={styles.infoText}>Total Stock: {wasteWeight.toFixed(1)} kg</Text>
-                
-                {finances?.gradeCRevenue > 0 ? (
-                    <View style={styles.soldBadge}>
-                        <Ionicons name="checkmark-done" size={16} color="#166534" />
-                        <Text style={styles.soldText}>Sold for LKR {finances.gradeCRevenue.toLocaleString()}</Text>
-                    </View>
-                ) : (
-                    <TouchableOpacity style={styles.sellWasteBtn} onPress={handleSellGradeC}>
-                        <Text style={styles.sellWasteText}>Sell to Dry Fish Market</Text>
-                    </TouchableOpacity>
-                )}
-            </View>
-        );
-    };
-
-    const renderFinancialSection = () => {
-        if (!finances || !summary) return null;
-
-        const isSold = summary.status === 'sold';
-        
-        // Calculate Estimates if not sold
-        let displayRevenue = finances.totalRevenue;
-        let isEstimate = false;
-
-        if (!isSold && prices.length > 0) {
-            isEstimate = true;
-            let estimatedRev = 0;
-            prices.forEach(p => {
-                const typeWeights = summary.catchBreakdownDetails?.[p.fishType] || { gradeA: 0, gradeB: 0 };
-                estimatedRev += (typeWeights.gradeA * p.priceA) + (typeWeights.gradeB * p.priceB);
-            });
-            estimatedRev += (finances.gradeCRevenue || 0);
-            displayRevenue = estimatedRev;
-        }
-
-        const displayNetProfit = displayRevenue - finances.totalCosts;
-
-        // Earnings distribution for estimates
-        const distOwner = displayNetProfit * (finances.commissions.owner / 100);
-        const distPlanner = displayNetProfit * (finances.commissions.planner / 100);
-        const distCrewTotal = displayNetProfit * (finances.commissions.crew / 100);
-        const crewCount = summary.crew?.length || 1;
-
-        return (
-            <View style={styles.section}>
-                <View style={styles.sectionHeader}>
-                    <Ionicons name="cash-outline" size={24} color="#2563eb" />
-                    <Text style={styles.sectionTitle}>
-                        {isEstimate ? "Estimated Financials" : "Finalized Financials"}
-                    </Text>
-                    {isEstimate && (
-                        <View style={styles.estimateBadge}>
-                            <Text style={styles.estimateBadgeText}>PENDING SALE</Text>
-                        </View>
-                    )}
-                </View>
-
-                <View style={styles.financeCard}>
-                    <View style={styles.financeRow}>
-                        <Text style={styles.financeLabel}>{isEstimate ? "Potential Revenue" : "Total Revenue"}</Text>
-                        <Text style={[styles.financeValue, { color: '#10b981' }]}>LKR {displayRevenue.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.financeRow}>
-                        <Text style={styles.financeLabel}>Total Costs</Text>
-                        <Text style={[styles.financeValue, { color: '#ef4444' }]}>- LKR {finances.totalCosts.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.divider} />
-                    <View style={styles.financeRow}>
-                        <Text style={styles.profitLabel}>{isEstimate ? "Projected Profit" : "Net Profit"}</Text>
-                        <Text style={styles.profitValue}>LKR {displayNetProfit.toLocaleString()}</Text>
-                    </View>
-                </View>
-
-                <Text style={styles.subTitle}>{isEstimate ? "Projected Distribution" : "Earnings Distribution"}</Text>
-                <View style={styles.distributionGrid}>
-                    <View style={styles.distItem}>
-                        <Text style={styles.distLabel}>Owner ({finances.commissions.owner}%)</Text>
-                        <Text style={styles.distAmount}>LKR {distOwner.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.distItem}>
-                        <Text style={styles.distLabel}>Planner ({finances.commissions.planner}%)</Text>
-                        <Text style={styles.distAmount}>LKR {distPlanner.toLocaleString()}</Text>
-                    </View>
-                    <View style={[styles.distItem, { width: '100%' }]}>
-                        <Text style={styles.distLabel}>Crew Shared ({finances.commissions.crew}%)</Text>
-                        <View style={styles.crewRow}>
-                             <Text style={styles.distAmount}>Total: LKR {distCrewTotal.toLocaleString()}</Text>
-                             <Text style={styles.crewNote}>Per Fisherman: LKR {(distCrewTotal / crewCount).toLocaleString()}</Text>
-                        </View>
-                    </View>
-                </View>
-                
-                {isEstimate && (
-                    <Text style={styles.disclaimerText}>
-                        * Estimates based on your asking prices. Final profit will be updated once a Buyer completes the purchase.
-                    </Text>
-                )}
-            </View>
+            'plain-text',
+            '5000'
         );
     };
 
@@ -365,177 +77,385 @@ const TripSummaryScreen = ({ route, navigation }) => {
         return (
             <View style={styles.loader}>
                 <ActivityIndicator size="large" color="#2563eb" />
-                <Text style={styles.loadingText}>Generating Trip Statement...</Text>
+                <Text style={styles.loadingText}>Generating Trip Statement…</Text>
             </View>
         );
     }
 
+    const isSold      = summary?.status === 'sold';
+    const isCompleted = summary?.status === 'completed';
+
+    /* ─── Derived catch stats ─── */
+    const totalWeight     = summary?.totalWeight     || 0;
+    const gradeAWeight    = summary?.supermarketStock || 0;
+    const gradeBWeight    = summary?.customerStock   || 0;
+    const gradeCWeight    = summary?.wasteProduct    || 0;
+    const catchCount      = summary?.catchCount      || 0;
+
+    /* ─── Derived financials ─── */
+    const totalCosts      = finances?.totalCosts     || 0;
+    const estimatedRev    = finances?.estimatedRevenue || 0;
+    const actualRev       = finances?.actualRevenue   || 0;
+    const displayRev      = isSold ? actualRev : estimatedRev;
+    const netProfit       = displayRev - totalCosts;
+    const gradeCRevenue   = finances?.gradeCRevenue  || 0;
+
+    const ownerPct        = finances?.commissions?.owner   ?? 40;
+    const plannerPct      = finances?.commissions?.planner ?? 10;
+    const crewPct         = finances?.commissions?.crew    ?? 50;
+
+    const ownerCut        = Math.max(0, netProfit * ownerPct  / 100);
+    const plannerCut      = Math.max(0, netProfit * plannerPct / 100);
+    const crewTotal       = Math.max(0, netProfit * crewPct   / 100);
+    const crewCount       = finances?.breakdown?.crewCount || summary?.crew?.length || 1;
+    const crewPer         = crewTotal / crewCount;
+
+    /* ─── Cost breakdown ─── */
+    const costs = finances?.costs || {};
+
+    /* ─── Fish prices set by planner ─── */
+    const fishPrices = finances?.fishPrices || [];
+
     return (
         <View style={styles.container}>
-            <LinearGradient 
-                colors={summary?.status === 'sold' ? ['#065f46', '#064e3b'] : ['#1e3a8a', '#1e40af']} 
+            <LinearGradient
+                colors={isSold ? ['#065f46', '#047857'] : ['#1e3a8a', '#1e40af']}
                 style={styles.header}
             >
                 <SafeAreaView>
                     <View style={styles.headerContent}>
-                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtnHeader}>
+                        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
                             <Ionicons name="arrow-back" size={24} color="#fff" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>
-                            {summary?.status === 'sold' ? 'Final Trip Statement' : 'Trip Summary & Estimates'}
+                            {isSold ? 'Final Trip Statement' : 'Trip Summary & Estimates'}
                         </Text>
                         <View style={{ width: 40 }} />
+                    </View>
+                    {/* Status pill */}
+                    <View style={styles.statusPill}>
+                        <Ionicons
+                            name={isSold ? 'checkmark-done-circle' : 'timer-outline'}
+                            size={14} color="#fff"
+                        />
+                        <Text style={styles.statusPillText}>
+                            {isSold ? 'SOLD' : isCompleted ? 'AWAITING BUYER' : summary?.status?.toUpperCase()}
+                        </Text>
                     </View>
                 </SafeAreaView>
             </LinearGradient>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                <View style={styles.section}>
-                    <View style={styles.sectionHeader}>
-                        <Ionicons name="stats-chart-outline" size={24} color="#2563eb" />
-                        <Text style={styles.sectionTitle}>Catch Summary</Text>
-                    </View>
-                    
+
+                {/* ══════════ CATCH OVERVIEW ══════════ */}
+                <View style={styles.card}>
+                    <SectionHeader icon="stats-chart-outline" title="Catch Overview" />
                     <View style={styles.statsRow}>
-                        <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Total Weight</Text>
-                            <Text style={styles.statValue}>{summary?.totalWeight || 0} kg</Text>
-                        </View>
-                        <View style={styles.statBox}>
-                            <Text style={styles.statLabel}>Total Catches</Text>
-                            <Text style={styles.statValue}>{summary?.catchCount || 0}</Text>
-                        </View>
+                        <StatBox label="Total Catches" value={catchCount} unit="" />
+                        <StatBox label="Total Weight"  value={fmtKg(totalWeight)} unit="kg" />
+                    </View>
+                    <View style={[styles.statsRow, { marginTop: 10 }]}>
+                        <StatBox label="Grade A 🟢" value={fmtKg(gradeAWeight)} unit="kg" color="#16a34a" />
+                        <StatBox label="Grade B 🟡" value={fmtKg(gradeBWeight)} unit="kg" color="#ca8a04" />
+                        <StatBox label="Grade C 🔴" value={fmtKg(gradeCWeight)} unit="kg" color="#dc2626" />
                     </View>
                 </View>
 
-                {renderCrewManagement()}
-                {renderPriceSettings()}
-                {renderGradeCSection()}
-                {renderFinancialSection()}
+                {/* ══════════ CATCH BREAKDOWN BY FISH TYPE ══════════ */}
+                {summary?.catchBreakdownDetails && Object.keys(summary.catchBreakdownDetails).length > 0 && (
+                    <View style={styles.card}>
+                        <SectionHeader icon="fish-outline" title="Catch Breakdown by Type" />
+                        {Object.entries(summary.catchBreakdownDetails).map(([fish, w]) => {
+                            const priceEntry = fishPrices.find(p => p.fishType === fish);
+                            const pricePerKg = priceEntry?.pricePerKg || 0;
+                            const sellableKg = (w.gradeA || 0) + (w.gradeB || 0);
+                            const est = sellableKg * pricePerKg;
+                            return (
+                                <View key={fish} style={styles.fishRow}>
+                                    <View style={styles.fishRowLeft}>
+                                        <Text style={styles.fishName}>{fish}</Text>
+                                        <View style={styles.gradeRow}>
+                                            {w.gradeA > 0 && <GradePill label={`A: ${fmtKg(w.gradeA)} kg`} color="#dcfce7" textColor="#166534" />}
+                                            {w.gradeB > 0 && <GradePill label={`B: ${fmtKg(w.gradeB)} kg`} color="#fef9c3" textColor="#854d0e" />}
+                                            {w.gradeC > 0 && <GradePill label={`C: ${fmtKg(w.gradeC)} kg`} color="#fee2e2" textColor="#991b1b" />}
+                                        </View>
+                                        {pricePerKg > 0 && (
+                                            <Text style={styles.fishPriceNote}>
+                                                LKR {fmt(pricePerKg)}/kg → Est. LKR {fmt(est)}
+                                            </Text>
+                                        )}
+                                    </View>
+                                    <Text style={styles.fishTotal}>{fmtKg(summary.catchBreakdown[fish])} kg</Text>
+                                </View>
+                            );
+                        })}
+                    </View>
+                )}
 
-                <View style={styles.actionRow}>
-                    {summary?.status === 'planned' && (
-                        <TouchableOpacity 
-                            style={[styles.actionBtn, { backgroundColor: '#fee2e2', borderColor: '#fecaca', borderWidth: 1 }]}
-                            onPress={handleCancelTrip}
-                        >
-                            <Text style={[styles.actionBtnText, { color: '#ef4444' }]}>Cancel Trip</Text>
-                        </TouchableOpacity>
-                    )}
-                    
-                    <TouchableOpacity 
-                        style={[styles.actionBtn, { backgroundColor: '#2563eb' }]}
-                        onPress={() => navigation.navigate('Home')}
-                    >
-                        <Text style={[styles.actionBtnText, { color: '#fff' }]}>Back to Home</Text>
-                    </TouchableOpacity>
+                {/* ══════════ GRADE C SECTION ══════════ */}
+                {gradeCWeight > 0 && (
+                    <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#f59e0b' }]}>
+                        <SectionHeader icon="trash-outline" title="Grade C — Dry Fish / Industrial" iconColor="#f59e0b" />
+                        <Text style={styles.infoText}>Stock: {fmtKg(gradeCWeight)} kg</Text>
+                        {gradeCRevenue > 0 ? (
+                            <View style={styles.soldBadge}>
+                                <Ionicons name="checkmark-done" size={16} color="#166534" />
+                                <Text style={styles.soldBadgeText}>Sold for LKR {fmt(gradeCRevenue)}</Text>
+                            </View>
+                        ) : (
+                            <TouchableOpacity style={styles.sellBtn} onPress={handleSellGradeC}>
+                                <Text style={styles.sellBtnText}>Record Grade C Sale</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
+                )}
+
+                {/* ══════════ COST BREAKDOWN ══════════ */}
+                <View style={styles.card}>
+                    <SectionHeader icon="receipt-outline" title="Trip Costs" />
+                    <CostRow label="⛽ Fuel"        value={costs.fuel   || 0} />
+                    <CostRow label="🍱 Food"         value={costs.food   || 0} />
+                    <CostRow label="🎣 Bait"         value={costs.bait   || 0} />
+                    <CostRow label="📦 Other"        value={costs.other  || 0} />
+                    <View style={styles.divider} />
+                    <View style={styles.costTotalRow}>
+                        <Text style={styles.costTotalLabel}>Total Costs</Text>
+                        <Text style={styles.costTotalValue}>LKR {fmt(totalCosts)}</Text>
+                    </View>
                 </View>
+
+                {/* ══════════ FINANCIAL SUMMARY ══════════ */}
+                <View style={[styles.card, { borderLeftWidth: 4, borderLeftColor: '#2563eb' }]}>
+                    <View style={styles.sectionHeaderRow}>
+                        <SectionHeader icon="cash-outline" title={isSold ? 'Finalized Financials' : 'Estimated Financials'} />
+                        {!isSold && (
+                            <View style={styles.estimateBadge}>
+                                <Text style={styles.estimateBadgeText}>ESTIMATE</Text>
+                            </View>
+                        )}
+                    </View>
+
+                    {/* Revenue row */}
+                    <View style={styles.finRow}>
+                        <Text style={styles.finLabel}>
+                            {isSold ? 'Sale Revenue' : 'Estimated Revenue'}
+                        </Text>
+                        <Text style={[styles.finValue, { color: '#16a34a' }]}>
+                            + LKR {fmt(displayRev)}
+                        </Text>
+                    </View>
+                    {gradeCRevenue > 0 && (
+                        <View style={styles.finRow}>
+                            <Text style={styles.finSubLabel}>  incl. Grade C sale</Text>
+                            <Text style={styles.finSubValue}>LKR {fmt(gradeCRevenue)}</Text>
+                        </View>
+                    )}
+                    <View style={styles.finRow}>
+                        <Text style={styles.finLabel}>Total Costs</Text>
+                        <Text style={[styles.finValue, { color: '#dc2626' }]}>
+                            − LKR {fmt(totalCosts)}
+                        </Text>
+                    </View>
+                    <View style={styles.divider} />
+                    <View style={styles.finRow}>
+                        <Text style={styles.profitLabel}>
+                            {isSold ? 'Net Profit' : 'Projected Profit'}
+                        </Text>
+                        <Text style={[styles.profitValue, { color: netProfit >= 0 ? '#2563eb' : '#dc2626' }]}>
+                            LKR {fmt(netProfit)}
+                        </Text>
+                    </View>
+
+                    {/* Earnings distribution */}
+                    <Text style={styles.subTitle}>Earnings Distribution</Text>
+                    <View style={styles.distGrid}>
+                        <DistCard
+                            label={`Boat Owner (${ownerPct}%)`}
+                            value={ownerCut}
+                            color="#7c3aed"
+                            icon="boat-outline"
+                        />
+                        <DistCard
+                            label={`Trip Planner (${plannerPct}%)`}
+                            value={plannerCut}
+                            color="#2563eb"
+                            icon="map-outline"
+                        />
+                        <View style={[styles.distCard, { width: '100%', backgroundColor: '#f0fdf4' }]}>
+                            <View style={styles.distCardRow}>
+                                <Ionicons name="people-outline" size={18} color="#16a34a" />
+                                <Text style={[styles.distLabel, { color: '#16a34a' }]}>
+                                    Crew Share ({crewPct}%) — {crewCount} fishermen
+                                </Text>
+                            </View>
+                            <Text style={styles.distAmount}>LKR {fmt(crewTotal)} total</Text>
+                            <Text style={styles.distPerPerson}>
+                                ≈ LKR {fmt(crewPer)} per person
+                            </Text>
+                        </View>
+                    </View>
+
+                    {!isSold && (
+                        <Text style={styles.disclaimer}>
+                            * Estimates are based on the prices set when ending the trip. Final amounts are confirmed once a buyer completes the purchase.
+                        </Text>
+                    )}
+                </View>
+
+                {/* ══════════ CREW LIST ══════════ */}
+                {summary?.crew && summary.crew.length > 0 && (
+                    <View style={styles.card}>
+                        <SectionHeader icon="people-outline" title="Crew Members" />
+                        {summary.crew.map((m, i) => (
+                            <View key={m._id || i} style={styles.crewRow}>
+                                <Ionicons name="person-circle-outline" size={28} color="#2563eb" />
+                                <View style={{ flex: 1, marginLeft: 10 }}>
+                                    <Text style={styles.crewName}>{m.name}</Text>
+                                    <Text style={styles.crewSub}>{m.district || 'N/A'}</Text>
+                                </View>
+                                <Text style={styles.crewShare}>LKR {fmt(crewPer)}</Text>
+                            </View>
+                        ))}
+                    </View>
+                )}
+
+                {/* ══════════ ACTIONS ══════════ */}
+                <TouchableOpacity
+                    style={styles.homeBtn}
+                    onPress={() => navigation.navigate('Home')}
+                >
+                    <Ionicons name="home-outline" size={20} color="#fff" />
+                    <Text style={styles.homeBtnText}>Back to Home</Text>
+                </TouchableOpacity>
 
             </ScrollView>
         </View>
     );
 };
 
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f8fafc' },
-    header: { paddingBottom: 20 },
-    headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
-    headerTitle: { color: '#fff', fontSize: 18, fontWeight: '800' },
-    backBtnHeader: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-    scrollContent: { padding: 20 },
-    section: { backgroundColor: '#fff', borderRadius: 24, padding: 20, marginBottom: 20, elevation: 2 },
-    sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, gap: 10 },
-    sectionTitle: { fontSize: 18, fontWeight: '800', color: '#1e293b' },
-    statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-    statBox: { flex: 1, backgroundColor: '#f1f5f9', padding: 16, borderRadius: 16, alignItems: 'center', marginHorizontal: 5 },
-    statLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
-    statValue: { fontSize: 20, fontWeight: '800', color: '#1e293b', marginTop: 4 },
-    financeCard: { backgroundColor: '#f8fafc', borderRadius: 16, padding: 16, marginBottom: 15 },
-    financeRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
-    financeLabel: { fontSize: 13, color: '#64748b', fontWeight: '600' },
-    financeValue: { fontSize: 14, fontWeight: '700' },
-    divider: { height: 1, backgroundColor: '#e2e8f0', marginVertical: 10 },
-    profitLabel: { fontSize: 15, fontWeight: '800', color: '#1e293b' },
-    profitValue: { fontSize: 18, fontWeight: '900', color: '#2563eb' },
-    subTitle: { fontSize: 14, fontWeight: '700', color: '#64748b', marginBottom: 12 },
-    distributionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-    distItem: { backgroundColor: '#f1f5f9', borderRadius: 12, padding: 12, width: '47%' },
-    distLabel: { fontSize: 11, color: '#64748b', fontWeight: '700', marginBottom: 4 },
-    distAmount: { fontSize: 14, fontWeight: '800', color: '#1e293b' },
-    crewRow: { marginTop: 4 },
-    crewNote: { fontSize: 10, color: '#2563eb', fontWeight: '600', marginTop: 2 },
-    soldBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#dcfce7', padding: 8, borderRadius: 8, marginTop: 10, gap: 5 },
-    soldText: { color: '#166534', fontSize: 13, fontWeight: '700' },
-    sellWasteBtn: { backgroundColor: '#fef3c7', padding: 12, borderRadius: 12, marginTop: 10, alignItems: 'center', borderWidth: 1, borderColor: '#fcd34d' },
-    sellWasteText: { color: '#92400e', fontSize: 14, fontWeight: '800' },
-    crewMemberRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#f8fafc', padding: 12, borderRadius: 12, marginBottom: 8 },
-    memberName: { fontSize: 14, fontWeight: '700', color: '#1e293b' },
-    removeBtn: { padding: 4 },
-    actionRow: { flexDirection: 'row', gap: 12, marginTop: 10, marginBottom: 40 },
-    actionBtn: { flex: 1, height: 56, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
-    actionBtnText: { fontSize: 16, fontWeight: '800' },
-    loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-    loadingText: { marginTop: 12, color: '#64748b', fontWeight: '600' },
-    priceSettingCard: { backgroundColor: '#f8fafc', borderRadius: 16, padding: 15, marginBottom: 12, borderWidth: 1, borderColor: '#e2e8f0' },
-    fishTypeName: { fontSize: 15, fontWeight: '700', color: '#1e293b', marginBottom: 10 },
-    priceRowInputs: { flexDirection: 'row', gap: 10 },
-    inputGroup: { flex: 1 },
-    inputLabel: { fontSize: 10, color: '#64748b', fontWeight: '700', marginBottom: 4 },
-    priceInput: { backgroundColor: '#fff', borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, padding: 8, fontSize: 14, fontWeight: '700', color: '#2563eb' },
-    savePricesBtn: { backgroundColor: '#0f172a', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 18, borderRadius: 20, marginTop: 15, gap: 10, elevation: 5 },
-    savePricesText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-    infoText: { fontSize: 13, color: '#64748b', marginBottom: 15, fontWeight: '500' },
-    sectionSub: { fontSize: 12, color: '#64748b', marginTop: 2 },
-    iconCircle: { width: 40, height: 40, borderRadius: 12, backgroundColor: '#eff6ff', justifyContent: 'center', alignItems: 'center' },
-    estimateBadge: {
-        backgroundColor: '#fff7ed',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderColor: '#ffedd5',
-    },
-    estimateBadgeText: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#c2410c',
-    },
-    disclaimerText: {
-        marginTop: 15,
-        fontSize: 11,
-        color: '#94a3b8',
-        fontStyle: 'italic',
-        lineHeight: 16,
-    },
-    priceCardHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 10,
-    },
-    activeTag: {
-        backgroundColor: '#eff6ff',
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 6,
-    },
-    activeTagText: {
-        fontSize: 10,
-        color: '#2563eb',
-        fontWeight: '800',
-    },
-    noCatchBox: {
-        padding: 30,
-        alignItems: 'center',
-        backgroundColor: '#f8fafc',
-        borderRadius: 16,
-    },
-    noCatchText: {
-        color: '#64748b',
-        fontSize: 14,
-        fontWeight: '600',
-    },
-});
+/* ── Small reusable components ─────────────────────────────── */
+const SectionHeader = ({ icon, title, iconColor = '#2563eb' }) => (
+    <View style={styles.sectionHeaderRow}>
+        <Ionicons name={icon} size={22} color={iconColor} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+    </View>
+);
 
+const StatBox = ({ label, value, unit, color = '#1e293b' }) => (
+    <View style={styles.statBox}>
+        <Text style={styles.statLabel}>{label}</Text>
+        <Text style={[styles.statValue, { color }]}>{value}{unit ? ` ${unit}` : ''}</Text>
+    </View>
+);
+
+const GradePill = ({ label, color, textColor }) => (
+    <View style={[styles.gradePill, { backgroundColor: color }]}>
+        <Text style={[styles.gradePillText, { color: textColor }]}>{label}</Text>
+    </View>
+);
+
+const CostRow = ({ label, value }) => (
+    <View style={styles.costRow}>
+        <Text style={styles.costLabel}>{label}</Text>
+        <Text style={styles.costValue}>LKR {Math.round(value).toLocaleString()}</Text>
+    </View>
+);
+
+const DistCard = ({ label, value, color, icon }) => (
+    <View style={[styles.distCard, { backgroundColor: '#f8fafc' }]}>
+        <View style={styles.distCardRow}>
+            <Ionicons name={icon} size={16} color={color} />
+            <Text style={[styles.distLabel, { color }]}>{label}</Text>
+        </View>
+        <Text style={styles.distAmount}>LKR {Math.round(value).toLocaleString()}</Text>
+    </View>
+);
+
+/* ── Styles ─────────────────────────────────────────────────── */
+const styles = StyleSheet.create({
+    container:       { flex: 1, backgroundColor: '#f1f5f9' },
+    header:          { paddingBottom: 16 },
+    headerContent:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
+    headerTitle:     { color: '#fff', fontSize: 18, fontWeight: '800' },
+    backBtn:         { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.15)', justifyContent: 'center', alignItems: 'center' },
+    statusPill:      { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, marginTop: 8, marginBottom: 4 },
+    statusPillText:  { color: '#fff', fontWeight: '800', fontSize: 12, letterSpacing: 1 },
+
+    scrollContent:   { padding: 16, paddingBottom: 50 },
+    card:            { backgroundColor: '#fff', borderRadius: 24, padding: 20, marginBottom: 16, elevation: 2 },
+
+    // Section header
+    sectionHeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+    sectionTitle:    { fontSize: 16, fontWeight: '800', color: '#1e293b', flex: 1 },
+
+    // Stats
+    statsRow:        { flexDirection: 'row', gap: 10 },
+    statBox:         { flex: 1, backgroundColor: '#f1f5f9', padding: 14, borderRadius: 16, alignItems: 'center' },
+    statLabel:       { fontSize: 11, color: '#64748b', fontWeight: '700', marginBottom: 4 },
+    statValue:       { fontSize: 18, fontWeight: '900', color: '#1e293b' },
+
+    // Fish breakdown
+    fishRow:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', backgroundColor: '#f8fafc', borderRadius: 14, padding: 14, marginBottom: 10 },
+    fishRowLeft:     { flex: 1, marginRight: 10 },
+    fishName:        { fontSize: 15, fontWeight: '800', color: '#1e293b', marginBottom: 6 },
+    fishTotal:       { fontSize: 16, fontWeight: '800', color: '#1e293b', alignSelf: 'center' },
+    gradeRow:        { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
+    gradePill:       { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
+    gradePillText:   { fontSize: 11, fontWeight: '800' },
+    fishPriceNote:   { fontSize: 12, color: '#2563eb', fontWeight: '600', marginTop: 4 },
+
+    // Grade C
+    infoText:        { fontSize: 14, color: '#64748b', fontWeight: '600', marginBottom: 10 },
+    soldBadge:       { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#dcfce7', padding: 10, borderRadius: 10 },
+    soldBadgeText:   { color: '#166534', fontWeight: '700', fontSize: 13 },
+    sellBtn:         { backgroundColor: '#fef3c7', padding: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#fcd34d', marginTop: 4 },
+    sellBtnText:     { color: '#92400e', fontWeight: '800', fontSize: 14 },
+
+    // Costs
+    costRow:         { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+    costLabel:       { fontSize: 14, color: '#64748b', fontWeight: '600' },
+    costValue:       { fontSize: 14, color: '#1e293b', fontWeight: '700' },
+    costTotalRow:    { flexDirection: 'row', justifyContent: 'space-between', paddingTop: 8 },
+    costTotalLabel:  { fontSize: 15, fontWeight: '800', color: '#1e293b' },
+    costTotalValue:  { fontSize: 15, fontWeight: '800', color: '#dc2626' },
+
+    // Finances
+    finRow:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
+    finLabel:        { fontSize: 14, color: '#64748b', fontWeight: '600' },
+    finValue:        { fontSize: 15, fontWeight: '800' },
+    finSubLabel:     { fontSize: 12, color: '#94a3b8', fontWeight: '500' },
+    finSubValue:     { fontSize: 12, color: '#64748b', fontWeight: '600' },
+    profitLabel:     { fontSize: 16, fontWeight: '800', color: '#1e293b' },
+    profitValue:     { fontSize: 22, fontWeight: '900' },
+    divider:         { height: 1, backgroundColor: '#e2e8f0', marginVertical: 10 },
+
+    // Estimate badge
+    estimateBadge:     { backgroundColor: '#fff7ed', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, borderWidth: 1, borderColor: '#fed7aa' },
+    estimateBadgeText: { fontSize: 10, fontWeight: '800', color: '#c2410c' },
+
+    // Distribution
+    subTitle:        { fontSize: 13, fontWeight: '700', color: '#64748b', marginTop: 14, marginBottom: 10 },
+    distGrid:        { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+    distCard:        { flex: 1, minWidth: '47%', padding: 14, borderRadius: 14 },
+    distCardRow:     { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+    distLabel:       { fontSize: 11, fontWeight: '700', flex: 1 },
+    distAmount:      { fontSize: 16, fontWeight: '900', color: '#1e293b', marginTop: 2 },
+    distPerPerson:   { fontSize: 12, color: '#16a34a', fontWeight: '700', marginTop: 2 },
+
+    disclaimer:      { fontSize: 11, color: '#94a3b8', fontStyle: 'italic', marginTop: 14, lineHeight: 16 },
+
+    // Crew
+    crewRow:         { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 14, padding: 12, marginBottom: 8 },
+    crewName:        { fontSize: 14, fontWeight: '800', color: '#1e293b' },
+    crewSub:         { fontSize: 12, color: '#64748b', fontWeight: '500' },
+    crewShare:       { fontSize: 14, fontWeight: '800', color: '#2563eb' },
+
+    // Bottom button
+    homeBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#2563eb', paddingVertical: 16, borderRadius: 20, marginTop: 6 },
+    homeBtnText:     { color: '#fff', fontSize: 17, fontWeight: '800' },
+
+    loader:          { flex: 1, justifyContent: 'center', alignItems: 'center' },
+    loadingText:     { marginTop: 12, color: '#64748b', fontWeight: '600' },
+});
 
 export default TripSummaryScreen;
