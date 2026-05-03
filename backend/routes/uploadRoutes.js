@@ -24,11 +24,15 @@ router.post('/', upload.single('image'), async (req, res) => {
         }
 
         const fileName = `${Date.now()}-${Math.round(Math.random() * 1E9)}.jpg`;
-        const bucketName = process.env.SUPABASE_BUCKET || 'marine-storage';
+        const bucketName = process.env.SUPABASE_BUCKET?.trim() || 'marine-storage';
+        const supabaseUrl = process.env.SUPABASE_URL?.trim();
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_ANON_KEY?.trim();
 
         // 1. Try Supabase Upload
-        if (process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY) {
+        if (supabaseUrl && supabaseKey) {
             try {
+                console.log(`📤 Uploading to Supabase bucket: ${bucketName}`);
+
                 const { data, error } = await supabase.storage
                     .from(bucketName)
                     .upload(`uploads/${fileName}`, req.file.buffer, {
@@ -36,20 +40,24 @@ router.post('/', upload.single('image'), async (req, res) => {
                         upsert: true
                     });
 
-                if (!error) {
+                if (error) {
+                    console.warn('⚠️ Supabase upload error:', JSON.stringify(error));
+                } else {
                     const { data: { publicUrl } } = supabase.storage
                         .from(bucketName)
                         .getPublicUrl(`uploads/${fileName}`);
                     
+                    console.log('✅ Supabase upload success:', publicUrl);
                     return res.status(200).json({ 
                         message: 'Upload successful (Supabase)',
                         url: publicUrl 
                     });
                 }
-                console.warn('Supabase Error, falling back to local:', error.message);
             } catch (supaErr) {
-                console.warn('Supabase Exception, falling back to local');
+                console.warn('⚠️ Supabase exception:', supaErr.message);
             }
+        } else {
+            console.warn('⚠️ Supabase env vars missing — using local fallback');
         }
 
         // 2. Fallback to Local Storage
@@ -61,12 +69,11 @@ router.post('/', upload.single('image'), async (req, res) => {
         const localFilePath = path.join(uploadDir, fileName);
         fs.writeFileSync(localFilePath, req.file.buffer);
 
-        // Get the host from the request to build the full URL
         const protocol = req.protocol;
         const host = req.get('host');
         const localUrl = `${protocol}://${host}/uploads/${fileName}`;
 
-        console.log('Local Upload Successful:', localUrl);
+        console.log('📁 Local upload fallback:', localUrl);
 
         res.status(200).json({ 
             message: 'Upload successful (Local Fallback)',
@@ -74,9 +81,10 @@ router.post('/', upload.single('image'), async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Upload Error:', error);
+        console.error('❌ Upload Error:', error);
         res.status(500).json({ message: 'Internal Server Error', error: error.message });
     }
 });
 
 export default router;
+

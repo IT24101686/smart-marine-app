@@ -86,3 +86,36 @@ export const getTripFishPrices = async (req, res) => {
         res.status(500).json({ message: error.message });
     }
 };
+
+// @desc    Get latest buying price per fish type across ALL trips (for Buyer Hub modal)
+// @route   GET /api/fish-prices/latest/by-fish-type
+// @access  Private
+export const getLatestBuyingPrices = async (req, res) => {
+    try {
+        // Unwind the prices array, sort by createdAt desc, group by fishType keeping the first (latest) price
+        const result = await TripFishPrice.aggregate([
+            { $sort: { createdAt: -1 } },
+            { $unwind: '$prices' },
+            {
+                $group: {
+                    _id: '$prices.fishType',
+                    pricePerKg: { $first: '$prices.pricePerKg' },
+                    lastUpdated: { $first: '$createdAt' },
+                    tripId:      { $first: '$tripId' }
+                }
+            },
+            { $sort: { _id: 1 } }
+        ]);
+
+        const formatted = result.map(r => ({
+            fishType:    r._id,
+            pricePerKg:  r.pricePerKg,
+            lastUpdated: r.lastUpdated,
+            tripId:      r.tripId
+        }));
+
+        res.status(200).json(formatted);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
