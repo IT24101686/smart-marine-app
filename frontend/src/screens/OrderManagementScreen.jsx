@@ -44,7 +44,7 @@ const OrderManagementScreen = ({ navigation }) => {
     const fetchOrders = async (role) => {
         setLoading(true);
         try {
-            const endpoint = role === 'main_buyer' ? '/orders/received' : '/orders/my';
+            const endpoint = role === 'main_buyer' ? '/api/orders/received' : '/api/orders/my';
             const response = await client.get(endpoint);
             setOrders(response.data);
         } catch (error) {
@@ -65,7 +65,7 @@ const OrderManagementScreen = ({ navigation }) => {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            await client.put(`/orders/${orderId}/cancel`);
+                            await client.put(`/api/orders/${orderId}/cancel`);
                             Alert.alert("Success", "Order cancelled");
                             fetchOrders(user.role);
                         } catch (error) {
@@ -80,7 +80,7 @@ const OrderManagementScreen = ({ navigation }) => {
 
     const updateStatus = async (orderId, newStatus) => {
         try {
-            await client.put(`/orders/${orderId}/status`, { status: newStatus });
+            await client.put(`/api/orders/${orderId}/status`, { status: newStatus });
             Alert.alert("Success", `Order marked as ${newStatus}`);
             fetchOrders(user.role);
         } catch (error) {

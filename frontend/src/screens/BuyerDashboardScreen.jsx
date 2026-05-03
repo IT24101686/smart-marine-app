@@ -34,10 +34,56 @@ const BuyerDashboardScreen = ({ navigation }) => {
     const [user, setUser] = useState(null);
     const [marketRates, setMarketRates] = useState([]);
     const [rateModalVisible, setRateModalVisible] = useState(false);
-    const [editingRate, setEditingRate] = useState(null);
+    const [editingRate, setEditingRate] = useState(null);   // which fish type card is expanded
+    const [draftPrices, setDraftPrices] = useState({});    // live edits before save
+    const [savingRate, setSavingRate] = useState(false);
     const [myStock, setMyStock] = useState([]);
     const [ongoingTrips, setOngoingTrips] = useState([]);
     const [refreshing, setRefreshing] = useState(false);
+    const [buyingPrices, setBuyingPrices] = useState([]); // latest pricePerKg from TripFishPrice
+
+    // ── Market Rate Helpers ────────────────────────────────────
+    const fetchBuyingPrices = async () => {
+        try {
+            const res = await client.get('/api/fish-prices/latest/by-fish-type');
+            setBuyingPrices(Array.isArray(res.data) ? res.data : []);
+        } catch (e) {
+            console.warn('Could not load buying prices:', e.message);
+        }
+    };
+
+    const openRateModal = () => {
+        fetchBuyingPrices();   // always refresh when opening
+        fetchMarketRates();
+        setRateModalVisible(true);
+    };
+
+    const openEditRate = (rate) => {
+        setEditingRate(rate.fishType);
+        setDraftPrices({
+            retailPriceA: String(rate.retailPriceA || ''),
+            retailPriceB: String(rate.retailPriceB || ''),
+        });
+    };
+
+    const handleUpdateRate = async (fishType) => {
+        setSavingRate(true);
+        try {
+            await client.post('/api/market-rates', {
+                fishType,
+                retailPriceA: parseFloat(draftPrices.retailPriceA) || 0,
+                retailPriceB: parseFloat(draftPrices.retailPriceB) || 0,
+            });
+            await fetchMarketRates();
+            setEditingRate(null);
+            Alert.alert('Saved ✅', `Retail prices updated for ${fishType}`);
+        } catch (e) {
+            Alert.alert('Error', 'Failed to update price');
+        } finally {
+            setSavingRate(false);
+        }
+    };
+
 
 
     const fishTypes = ['All', 'Tuna (කෙලවල්ලා)', 'Skipjack (බලයා)', 'Marlin (කොප්පරා)', 'Mullet (මෝරා)'];
@@ -341,7 +387,7 @@ const BuyerDashboardScreen = ({ navigation }) => {
                     <View style={styles.headerActions}>
                         <TouchableOpacity 
                             style={styles.manageRatesBtn} 
-                            onPress={() => setRateModalVisible(true)}
+                            onPress={() => openRateModal()}
                         >
                             <Ionicons name="settings-outline" size={18} color="#fff" />
                             <Text style={styles.manageRatesText}>Market Prices</Text>
@@ -470,75 +516,131 @@ const BuyerDashboardScreen = ({ navigation }) => {
                 />
             )}
 
-            {/* Market Rate Management Modal */}
+            {/* ════ Market Price Management Modal ════ */}
             <RNModal visible={rateModalVisible} animationType="slide" transparent>
                 <View style={styles.modalOverlay}>
                     <View style={styles.modalContent}>
+
+                        {/* Header */}
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Market Price Management</Text>
-                            <TouchableOpacity onPress={() => setRateModalVisible(false)}>
+                            <View>
+                                <Text style={styles.modalTitle}>📊 Market Prices</Text>
+                                <Text style={styles.modalSubtitle}>Tap a card to edit prices</Text>
+                            </View>
+                            <TouchableOpacity onPress={() => { setRateModalVisible(false); setEditingRate(null); }}>
                                 <Ionicons name="close" size={28} color="#64748b" />
                             </TouchableOpacity>
                         </View>
 
-                        <ScrollView style={styles.ratesList}>
-                            {marketRates.map((rate) => (
-                                <View key={rate._id} style={styles.rateEditCard}>
-                                    <Text style={styles.rateFishType}>{rate.fishType}</Text>
-                                    <View style={styles.priceEditSection}>
-                                        <Text style={styles.priceGroupLabel}>Buying Prices (මාළු ගන්නා මිල)</Text>
-                                        <View style={styles.priceEditRow}>
-                                            <View style={styles.priceInputBox}>
-                                                <Text style={styles.priceInputLabel}>Grade A</Text>
-                                                <TextInput 
-                                                    style={styles.priceInput}
-                                                    keyboardType="numeric"
-                                                    defaultValue={rate.gradeAPrice.toString()}
-                                                    onEndEditing={(e) => handleUpdateRate(rate.fishType, 'gradeAPrice', e.nativeEvent.text)}
-                                                />
-                                            </View>
-                                            <View style={styles.priceInputBox}>
-                                                <Text style={styles.priceInputLabel}>Grade B</Text>
-                                                <TextInput 
-                                                    style={styles.priceInput}
-                                                    keyboardType="numeric"
-                                                    defaultValue={rate.gradeBPrice.toString()}
-                                                    onEndEditing={(e) => handleUpdateRate(rate.fishType, 'gradeBPrice', e.nativeEvent.text)}
-                                                />
-                                            </View>
-                                        </View>
-                                    </View>
+                        <ScrollView style={styles.ratesList} showsVerticalScrollIndicator={false}>
+                            {marketRates.map((rate) => {
+                                const isEditing = editingRate === rate.fishType;
+                                return (
+                                    <View key={rate._id} style={[styles.rateCard, isEditing && styles.rateCardActive]}>
 
-                                    <View style={[styles.priceEditSection, { marginTop: 15 }]}>
-                                        <Text style={[styles.priceGroupLabel, { color: '#16a34a' }]}>Retail Selling Prices (පාරිභෝගිකයාට විකුණන මිල)</Text>
-                                        <View style={styles.priceEditRow}>
-                                            <View style={styles.priceInputBox}>
-                                                <Text style={styles.priceInputLabel}>Grade A</Text>
-                                                <TextInput 
-                                                    style={[styles.priceInput, { color: '#16a34a', borderColor: '#bbf7d0' }]}
-                                                    keyboardType="numeric"
-                                                    defaultValue={rate.retailPriceA?.toString() || "1800"}
-                                                    onEndEditing={(e) => handleUpdateRate(rate.fishType, 'retailPriceA', e.nativeEvent.text)}
-                                                />
+                                        {/* ── Display row (always visible) ── */}
+                                        <TouchableOpacity
+                                            style={styles.rateCardHeader}
+                                            onPress={() => isEditing ? setEditingRate(null) : openEditRate(rate)}
+                                            activeOpacity={0.8}
+                                        >
+                                            <View style={styles.rateCardLeft}>
+                                                <Text style={styles.rateFishType}>🐟 {rate.fishType}</Text>
+                                                <View style={styles.ratePillRow}>
+                                                    <View style={[styles.ratePill, { backgroundColor: '#dcfce7' }]}>
+                                                        <Text style={[styles.ratePillText, { color: '#166534' }]}>A: LKR {Math.round(rate.gradeAPrice || 0).toLocaleString()}/kg</Text>
+                                                    </View>
+                                                    <View style={[styles.ratePill, { backgroundColor: '#fef9c3' }]}>
+                                                        <Text style={[styles.ratePillText, { color: '#854d0e' }]}>B: LKR {Math.round(rate.gradeBPrice || 0).toLocaleString()}/kg</Text>
+                                                    </View>
+                                                </View>
+                                                <View style={styles.ratePillRow}>
+                                                    <View style={[styles.ratePill, { backgroundColor: '#eff6ff' }]}>
+                                                        <Text style={[styles.ratePillText, { color: '#1e40af' }]}>Retail A: LKR {Math.round(rate.retailPriceA || 0).toLocaleString()}</Text>
+                                                    </View>
+                                                    <View style={[styles.ratePill, { backgroundColor: '#eff6ff' }]}>
+                                                        <Text style={[styles.ratePillText, { color: '#1e40af' }]}>Retail B: LKR {Math.round(rate.retailPriceB || 0).toLocaleString()}</Text>
+                                                    </View>
+                                                </View>
                                             </View>
-                                            <View style={styles.priceInputBox}>
-                                                <Text style={styles.priceInputLabel}>Grade B</Text>
-                                                <TextInput 
-                                                    style={[styles.priceInput, { color: '#16a34a', borderColor: '#bbf7d0' }]}
-                                                    keyboardType="numeric"
-                                                    defaultValue={rate.retailPriceB?.toString() || "1300"}
-                                                    onEndEditing={(e) => handleUpdateRate(rate.fishType, 'retailPriceB', e.nativeEvent.text)}
-                                                />
+                                            <Ionicons
+                                                name={isEditing ? 'chevron-up' : 'create-outline'}
+                                                size={20} color={isEditing ? '#2563eb' : '#94a3b8'}
+                                            />
+                                        </TouchableOpacity>
+
+                                        {/* ── Edit form (only when selected) ── */}
+                                        {isEditing && (
+                                            <View style={styles.editForm}>
+                                                <View style={styles.editDivider} />
+
+                                                <Text style={styles.editGroupLabel}>📋 Planner Buying Price (from TripFishPrice — read only)</Text>
+                                                {(() => {
+                                                    const bp = buyingPrices.find(p => p.fishType === rate.fishType);
+                                                    return (
+                                                        <View style={styles.readOnlyBox}>
+                                                            <View>
+                                                                <Text style={styles.readOnlyText}>
+                                                                    {bp
+                                                                        ? `LKR ${Math.round(bp.pricePerKg).toLocaleString()} / kg`
+                                                                        : 'No data yet'}
+                                                                </Text>
+                                                                {bp && (
+                                                                    <Text style={{ fontSize: 10, color: '#94a3b8', marginTop: 2 }}>
+                                                                        Last set: {new Date(bp.lastUpdated).toLocaleDateString()}
+                                                                    </Text>
+                                                                )}
+                                                            </View>
+                                                            <Ionicons name="lock-closed-outline" size={14} color="#94a3b8" />
+                                                        </View>
+                                                    );
+                                                })()}
+
+
+                                                <Text style={[styles.editGroupLabel, { color: '#16a34a', marginTop: 12 }]}>🏪 Retail Selling Prices (to customers)</Text>
+                                                <View style={styles.editRow}>
+                                                    <View style={styles.editInputBox}>
+                                                        <Text style={styles.editInputLabel}>Grade A (LKR/kg)</Text>
+                                                        <TextInput
+                                                            style={[styles.editInput, { borderColor: '#bbf7d0' }]}
+                                                            keyboardType="numeric"
+                                                            value={draftPrices.retailPriceA}
+                                                            onChangeText={(v) => setDraftPrices(p => ({ ...p, retailPriceA: v }))}
+                                                            placeholder="e.g. 1800"
+                                                        />
+                                                    </View>
+                                                    <View style={styles.editInputBox}>
+                                                        <Text style={styles.editInputLabel}>Grade B (LKR/kg)</Text>
+                                                        <TextInput
+                                                            style={[styles.editInput, { borderColor: '#bbf7d0' }]}
+                                                            keyboardType="numeric"
+                                                            value={draftPrices.retailPriceB}
+                                                            onChangeText={(v) => setDraftPrices(p => ({ ...p, retailPriceB: v }))}
+                                                            placeholder="e.g. 1300"
+                                                        />
+                                                    </View>
+                                                </View>
+
+                                                <TouchableOpacity
+                                                    style={[styles.saveRateBtn, savingRate && { opacity: 0.6 }]}
+                                                    onPress={() => handleUpdateRate(rate.fishType)}
+                                                    disabled={savingRate}
+                                                >
+                                                    {savingRate
+                                                        ? <ActivityIndicator color="#fff" />
+                                                        : <><Ionicons name="save-outline" size={18} color="#fff" /><Text style={styles.saveRateBtnText}>Save Prices</Text></>
+                                                    }
+                                                </TouchableOpacity>
                                             </View>
-                                        </View>
+                                        )}
                                     </View>
-                                </View>
-                            ))}
+                                );
+                            })}
                         </ScrollView>
-                        
-                        <TouchableOpacity 
+
+                        <TouchableOpacity
                             style={styles.closeModalBtn}
-                            onPress={() => setRateModalVisible(false)}
+                            onPress={() => { setRateModalVisible(false); setEditingRate(null); }}
                         >
                             <Text style={styles.closeModalBtnText}>Done</Text>
                         </TouchableOpacity>
@@ -547,18 +649,6 @@ const BuyerDashboardScreen = ({ navigation }) => {
             </RNModal>
         </View>
     );
-};
-
-const handleUpdateRate = async (fishType, field, value) => {
-    try {
-        await client.post('/api/market-rates', {
-            fishType,
-            [field]: parseFloat(value)
-        });
-        // Success
-    } catch (e) {
-        Alert.alert("Error", "Failed to update price");
-    }
 };
 
 const styles = StyleSheet.create({
@@ -890,61 +980,61 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         marginBottom: 20,
     },
-    modalTitle: {
-        fontSize: 20,
-        fontWeight: '800',
-        color: '#1e293b',
-    },
-    ratesList: {
-        marginBottom: 20,
-    },
-    rateEditCard: {
+    modalSubtitle: { fontSize: 13, color: '#64748b', fontWeight: '500', marginTop: 2 },
+
+    // ── Rate cards (display view) ────────────────────────
+    rateCard: {
         backgroundColor: '#f8fafc',
-        borderRadius: 16,
+        borderRadius: 18,
         padding: 16,
         marginBottom: 12,
         borderWidth: 1,
         borderColor: '#e2e8f0',
     },
-    rateFishType: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#1e293b',
-        marginBottom: 12,
+    rateCardActive: {
+        borderColor: '#2563eb',
+        borderWidth: 2,
+        backgroundColor: '#eff6ff',
     },
-    priceEditSection: {
-        marginBottom: 5,
-    },
-    priceGroupLabel: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#1e3a8a',
-        marginBottom: 8,
-        textTransform: 'uppercase',
-    },
-    priceEditRow: {
+    rateCardHeader: {
         flexDirection: 'row',
-        gap: 12,
+        justifyContent: 'space-between',
+        alignItems: 'flex-start',
     },
-    priceInputBox: {
-        flex: 1,
-    },
-    priceInputLabel: {
-        fontSize: 11,
-        color: '#64748b',
-        fontWeight: '700',
-        marginBottom: 4,
-    },
-    priceInput: {
+    rateCardLeft: { flex: 1, marginRight: 10 },
+    rateFishType: { fontSize: 16, fontWeight: '800', color: '#1e293b', marginBottom: 8 },
+    ratePillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 5 },
+    ratePill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+    ratePillText: { fontSize: 12, fontWeight: '700' },
+
+    // ── Edit form (expanded view) ────────────────────────
+    editForm: { marginTop: 8 },
+    editDivider: { height: 1, backgroundColor: '#bfdbfe', marginVertical: 12 },
+    editGroupLabel: { fontSize: 11, fontWeight: '800', color: '#1e3a8a', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 },
+    editRow: { flexDirection: 'row', gap: 10 },
+    editInputBox: { flex: 1 },
+    editInputLabel: { fontSize: 11, color: '#64748b', fontWeight: '700', marginBottom: 4 },
+    editInput: {
         backgroundColor: '#fff',
-        borderWidth: 1,
+        borderWidth: 1.5,
         borderColor: '#cbd5e1',
         borderRadius: 10,
         padding: 10,
         fontSize: 15,
         fontWeight: '700',
-        color: '#2563eb',
+        color: '#1e293b',
     },
+    saveRateBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        backgroundColor: '#2563eb',
+        paddingVertical: 13,
+        borderRadius: 14,
+        marginTop: 14,
+    },
+    saveRateBtnText: { color: '#fff', fontWeight: '800', fontSize: 15 },
     closeModalBtn: {
         backgroundColor: '#1e3a8a',
         paddingVertical: 16,
@@ -1092,6 +1182,22 @@ const styles = StyleSheet.create({
         fontSize: 14,
         fontWeight: '900',
         color: '#166534',
+    },
+    // ── Read-only display box ──────────────────────────────
+    readOnlyBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        backgroundColor: '#f1f5f9',
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        borderRadius: 10,
+        padding: 10,
+    },
+    readOnlyText: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#64748b',
     },
 });
 
