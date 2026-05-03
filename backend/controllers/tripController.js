@@ -2,6 +2,7 @@ import Trip from '../models/Trip.js';
 import User from '../models/User.js';
 import Vessel from '../models/Vessel.js';
 import Payout from '../models/Payout.js';
+import TripFishPrice from '../models/TripFishPrice.js';
 import { createNotification } from './notificationController.js';
 
 
@@ -89,35 +90,78 @@ export const getAvailableTrips = async (req, res) => {
     }
 };
 
-// @desc    Get all completed trips (Market Feed)
+// @desc    Get all completed trips (Market Feed) — with catches & fish prices embedded
 export const getAllCompletedTrips = async (req, res) => {
     try {
         const { district } = req.query;
+
+        // Build the base query
         let query = { status: { $in: ['completed', 'sold'] } };
-        
-        if (district) {
-            const nearby = getNearbyDistricts(district);
-            // We'll filter by planner's district in the populate match
-        }
 
         const trips = await Trip.find(query)
-            .populate({
-                path: 'vesselId',
-                select: 'name licenseNumber image'
-            })
-            .populate({
-                path: 'plannerId',
-                select: 'name district phone address'
-            });
+            .populate({ path: 'vesselId',  select: 'name licenseNumber image vesselType' })
+            .populate({ path: 'plannerId', select: 'name district phone address' })
+            .populate({ path: 'catches',   select: 'fishType grade weight photos' });
 
-        // If district is provided, filter the results to only those in nearby districts
+        // Apply 3-district proximity filter
         let filteredTrips = trips;
         if (district) {
-            const nearby = getNearbyDistricts(district);
+            const nearby = getNearbyDistricts(district); // always 3 districts incl. own
             filteredTrips = trips.filter(t => t.plannerId && nearby.includes(t.plannerId.district));
         }
 
-        res.status(200).json(filteredTrips || []);
+        // Embed TripFishPrice for each trip (single bulk fetch for performance)
+        const tripIds = filteredTrips.map(t => t._id);
+        const fishPriceDocs = await TripFishPrice.find({ tripId: { $in: tripIds } });
+        const priceMap = {};
+        fishPriceDocs.forEach(doc => { priceMap[doc.tripId.toString()] = doc.prices; });
+
+        // Build catch summary inline (no separate /summary call needed)
+        const enriched = filteredTrips.map(trip => {
+            const prices = priceMap[trip._id.toString()] || [];
+
+            let gradeAWeight = 0, gradeBWeight = 0, gradeCWeight = 0, totalWeight = 0;
+            const catchBreakdown = {};
+
+            (trip.catches || []).forEach(c => {
+                totalWeight += c.weight || 0;
+                if (c.grade === 'Grade A') gradeAWeight += c.weight || 0;
+                else if (c.grade === 'Grade B') gradeBWeight += c.weight || 0;
+                else if (c.grade === 'Grade C') gradeCWeight += c.weight || 0;
+
+                if (!catchBreakdown[c.fishType]) catchBreakdown[c.fishType] = { gradeA: 0, gradeB: 0, gradeC: 0, total: 0 };
+                catchBreakdown[c.fishType].total += c.weight || 0;
+                if (c.grade === 'Grade A') catchBreakdown[c.fishType].gradeA += c.weight || 0;
+                else if (c.grade === 'Grade B') catchBreakdown[c.fishType].gradeB += c.weight || 0;
+                else if (c.grade === 'Grade C') catchBreakdown[c.fishType].gradeC += c.weight || 0;
+            });
+
+            // Estimate total value using TripFishPrice (pricePerKg × sellable kg)
+            let estimatedValue = 0;
+            prices.forEach(p => {
+                const breakdown = catchBreakdown[p.fishType];
+                if (breakdown) {
+                    const sellableKg = (breakdown.gradeA || 0) + (breakdown.gradeB || 0);
+                    estimatedValue += sellableKg * (p.pricePerKg || 0);
+                }
+            });
+
+            return {
+                ...trip.toObject(),
+                fishPrices: prices,
+                catchSummary: {
+                    totalWeight,
+                    gradeAWeight,
+                    gradeBWeight,
+                    gradeCWeight,
+                    catchCount: (trip.catches || []).length,
+                    catchBreakdown
+                },
+                estimatedValue
+            };
+        });
+
+        res.status(200).json(enriched);
     } catch (error) {
         res.status(500).json({ message: error.message });
     }
@@ -126,90 +170,100 @@ export const getAllCompletedTrips = async (req, res) => {
 // @desc    Buy a trip catch
 export const buyTripCatch = async (req, res) => {
     try {
-        const trip = await Trip.findById(req.params.id).populate('vesselId');
+        const trip = await Trip.findById(req.params.id)
+            .populate('vesselId')
+            .populate('crew', '_id');
+
         if (!trip) return res.status(404).json({ message: "Trip not found" });
-        
-        if (trip.status === 'sold') {
-            return res.status(400).json({ message: "Already sold" });
-        }
+        if (trip.status === 'sold') return res.status(400).json({ message: "Already sold" });
 
         const totalRevenue = req.body.totalPrice || 0;
         trip.status = 'sold';
         trip.buyerId = req.user._id;
         trip.totalRevenue = totalRevenue;
-        
+
         const updatedTrip = await trip.save();
-        
-        // --- PERSISTENT PAYOUT GENERATION ---
-        const vessel = trip.vesselId;
-        const totalCosts = (trip.fuelCost || 0) + (trip.foodCost || 0) + (trip.baitCost || 0) + (trip.otherCosts || 0);
+
+        // --- PAYOUT GENERATION ---
+        const vessel = trip.vesselId; // may be null if vessel was deleted
+        const vesselName = vessel?.name || 'Vessel';
+
+        const ownerCommission  = vessel?.ownerCommission  ?? 40;
+        const plannerCommission = vessel?.plannerCommission ?? 10;
+        const crewCommission   = vessel?.crewCommission   ?? 50;
+
+        const totalCosts      = (trip.fuelCost || 0) + (trip.foodCost || 0) + (trip.baitCost || 0) + (trip.otherCosts || 0);
         const combinedRevenue = (trip.totalRevenue || 0) + (trip.gradeCRevenue || 0);
-        
+
         let remainingProfit = Math.max(0, combinedRevenue - totalCosts);
-        let ownerEarnings = 0;
+        let ownerEarnings   = 0;
         const payoutRecords = [];
 
-        // 1. Check if it's a Rented Vessel
-        if (vessel.status === 'rented' || (vessel.isAvailableForRent && vessel.currentRenter)) {
-            // Calculate rental fee (For now, assume 1 trip = 1 rental period, or calculate days)
-            const days = Math.max(1, Math.ceil((new Date() - new Date(trip.departureTime)) / (1000 * 60 * 60 * 24)));
-            const rentalFee = (vessel.rentalPrice || 0) * days;
-            
-            ownerEarnings = rentalFee;
-            remainingProfit = Math.max(0, remainingProfit - rentalFee);
+        if (vessel) {
+            // 1. Owner share
+            const isRented = vessel.status === 'rented' || (vessel.isAvailableForRent && vessel.currentRenter);
 
+            if (isRented) {
+                const days      = Math.max(1, Math.ceil((new Date() - new Date(trip.departureTime)) / (1000 * 60 * 60 * 24)));
+                const rentalFee = (vessel.rentalPrice || 0) * days;
+                ownerEarnings   = rentalFee;
+                remainingProfit = Math.max(0, remainingProfit - rentalFee);
+
+                if (vessel.ownerId) {
+                    payoutRecords.push({
+                        tripId: trip._id,
+                        userId: vessel.ownerId,
+                        role:   'boat_owner',
+                        amount: ownerEarnings,
+                        type:   'rental'          // ✅ matches Payout enum
+                    });
+                }
+            } else {
+                ownerEarnings   = (remainingProfit * ownerCommission) / 100;
+                remainingProfit -= ownerEarnings;
+
+                if (vessel.ownerId) {
+                    payoutRecords.push({
+                        tripId: trip._id,
+                        userId: vessel.ownerId,
+                        role:   'boat_owner',
+                        amount: ownerEarnings,
+                        type:   'share'
+                    });
+                }
+            }
+        }
+
+        // 2. Planner + Crew split from remainingProfit
+        const totalRemRatio  = plannerCommission + crewCommission;
+        const plannerShare   = totalRemRatio > 0 ? (remainingProfit * plannerCommission) / totalRemRatio : 0;
+        const totalCrewShare = remainingProfit - plannerShare;
+
+        if (trip.plannerId) {
             payoutRecords.push({
                 tripId: trip._id,
-                userId: vessel.ownerId,
-                role: 'boat_owner',
-                amount: ownerEarnings,
-                type: 'rental_fee'
-            });
-        } else {
-            // Traditional Profit Sharing (Own Boat)
-            ownerEarnings = (remainingProfit * (vessel.ownerCommission || 40)) / 100;
-            remainingProfit -= ownerEarnings;
-
-            payoutRecords.push({
-                tripId: trip._id,
-                userId: vessel.ownerId,
-                role: 'boat_owner',
-                amount: ownerEarnings,
-                type: 'share'
+                userId: trip.plannerId,
+                role:   'trip_planner',
+                amount: plannerShare,
+                type:   'commission'
             });
         }
 
-        // 2. Distribute Remaining Profit among Planner and Crew
-        const plannerComm = vessel.plannerCommission || 10;
-        const crewComm = vessel.crewCommission || 50;
-        const totalRemRatio = plannerComm + crewComm;
-        
-        const plannerShare = totalRemRatio > 0 ? (remainingProfit * plannerComm) / totalRemRatio : 0;
-        const totalCrewShare = remainingProfit - plannerShare;
-
-        // Add Planner Payout
-        payoutRecords.push({
-            tripId: trip._id,
-            userId: trip.plannerId,
-            role: 'trip_planner',
-            amount: plannerShare,
-            type: 'commission'
-        });
-
-        // Add Crew Payouts (Only for those present)
-        const attendance = trip.attendance || [];
+        // Crew payouts — prefer attendance list, fall back to full crew
+        const attendance  = trip.attendance || [];
         const presentCrew = attendance.filter(a => a.isPresent).map(a => a.userId);
-        const crewCount = presentCrew.length;
+        const crewList    = presentCrew.length > 0 ? presentCrew : (trip.crew || []).map(c => c._id || c);
+        const crewCount   = crewList.length;
 
         if (crewCount > 0) {
-            const individualCrewShare = totalCrewShare / crewCount;
-            presentCrew.forEach(crewId => {
+            const perCrew = totalCrewShare / crewCount;
+            crewList.forEach(crewId => {
                 payoutRecords.push({
                     tripId: trip._id,
                     userId: crewId,
-                    role: 'crew',
-                    amount: individualCrewShare,
-                    type: 'share'
+                    role:   'crew',
+                    amount: perCrew,
+                    type:   'share'
                 });
             });
         }
@@ -218,26 +272,27 @@ export const buyTripCatch = async (req, res) => {
             await Payout.insertMany(payoutRecords);
         }
 
-        // ------------------------------------
+        // Notifications
+        const stakeholders = [
+            trip.plannerId,
+            vessel?.ownerId,
+            ...(trip.crew || []).map(c => c._id || c)
+        ].filter(Boolean);
 
-        // Notify stakeholders
-        const stakeholders = [trip.plannerId, vessel?.ownerId, ...trip.crew];
-        
         stakeholders.forEach(userId => {
-            if (userId) {
-                createNotification(
-                    userId,
-                    "Catch Sold! 💰",
-                    `The catch from trip on ${vessel?.name || 'Vessel'} has been sold for LKR ${totalRevenue.toLocaleString()}. Check your earnings.`,
-                    'payment',
-                    trip._id
-                );
-            }
+            createNotification(
+                userId,
+                "Catch Sold! 💰",
+                `The catch from trip on ${vesselName} has been sold for LKR ${totalRevenue.toLocaleString()}. Check your earnings.`,
+                'payment',
+                trip._id
+            );
         });
 
         res.status(200).json({ message: "Purchase successful!", trip: updatedTrip });
 
     } catch (error) {
+        console.error('buyTripCatch error:', error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -268,36 +323,71 @@ export const getTripFinances = async (req, res) => {
             
         if (!trip) return res.status(404).json({ message: "Trip not found" });
 
-        const totalCosts = (trip.fuelCost || 0) + (trip.foodCost || 0) + (trip.baitCost || 0) + (trip.otherCosts || 0);
-        // Total Revenue is Primary Revenue + Grade C Revenue
-        const combinedRevenue = (trip.totalRevenue || 0) + (trip.gradeCRevenue || 0);
-        const netProfit = combinedRevenue - totalCosts;
-
         const vessel = trip.vesselId;
-        const ownerEarnings = (netProfit * (vessel.ownerCommission || 40)) / 100;
-        const plannerEarnings = (netProfit * (vessel.plannerCommission || 10)) / 100;
-        const totalCrewEarnings = (netProfit * (vessel.crewCommission || 50)) / 100;
-        
-        const crewCount = trip.crew.length || 1;
+        const ownerPct  = vessel?.ownerCommission  ?? 40;
+        const plannerPct = vessel?.plannerCommission ?? 10;
+        const crewPct   = vessel?.crewCommission   ?? 50;
+
+        const totalCosts = (trip.fuelCost || 0) + (trip.foodCost || 0) + (trip.baitCost || 0) + (trip.otherCosts || 0);
+
+        // Actual revenue only set once a buyer purchases
+        const actualRevenue = (trip.totalRevenue || 0) + (trip.gradeCRevenue || 0);
+
+        // Fetch per-kg prices set by planner when trip ended
+        const fishPriceDoc = await TripFishPrice.findOne({ tripId: trip._id });
+
+        // Build estimated revenue from fishPrices × weight-per-grade
+        let estimatedRevenue = 0;
+        if (fishPriceDoc && fishPriceDoc.prices.length > 0) {
+            // We need catches to get weight per fish type
+            const tripWithCatches = await Trip.findById(trip._id).populate('catches');
+            fishPriceDoc.prices.forEach(priceEntry => {
+                const pricePerKg = priceEntry.pricePerKg || 0;
+                // Sum all catches of this fish type (Grade A + Grade B — Grade C is sold separately)
+                const totalKg = tripWithCatches.catches
+                    .filter(c => c.fishType === priceEntry.fishType && c.grade !== 'Grade C')
+                    .reduce((sum, c) => sum + (c.weight || 0), 0);
+                estimatedRevenue += totalKg * pricePerKg;
+            });
+            estimatedRevenue += (trip.gradeCRevenue || 0); // add Grade C revenue if already sold
+        }
+
+        const isSold = trip.status === 'sold';
+        const displayRevenue = isSold ? actualRevenue : (estimatedRevenue || actualRevenue);
+        const netProfit = displayRevenue - totalCosts;
+
+        const ownerEarnings       = Math.max(0, netProfit * ownerPct  / 100);
+        const plannerEarnings     = Math.max(0, netProfit * plannerPct / 100);
+        const totalCrewEarnings   = Math.max(0, netProfit * crewPct   / 100);
+        const crewCount           = trip.crew.length || 1;
         const individualCrewEarnings = totalCrewEarnings / crewCount;
 
         res.status(200).json({
-            totalRevenue: combinedRevenue,
-            primaryRevenue: trip.totalRevenue,
-            gradeCRevenue: trip.gradeCRevenue,
+            totalRevenue:    displayRevenue,
+            actualRevenue,
+            estimatedRevenue,
+            gradeCRevenue:   trip.gradeCRevenue || 0,
             totalCosts,
             netProfit,
+            isSold,
+            fishPrices:      fishPriceDoc ? fishPriceDoc.prices : [],
             breakdown: {
-                owner: ownerEarnings,
-                planner: plannerEarnings,
-                crewTotal: totalCrewEarnings,
+                owner:         ownerEarnings,
+                planner:       plannerEarnings,
+                crewTotal:     totalCrewEarnings,
                 crewIndividual: individualCrewEarnings,
                 crewCount
             },
             commissions: {
-                owner: vessel.ownerCommission,
-                planner: vessel.plannerCommission,
-                crew: vessel.crewCommission
+                owner:   ownerPct,
+                planner: plannerPct,
+                crew:    crewPct
+            },
+            costs: {
+                fuel:   trip.fuelCost   || 0,
+                food:   trip.foodCost   || 0,
+                bait:   trip.baitCost   || 0,
+                other:  trip.otherCosts || 0
             }
         });
     } catch (error) {
@@ -442,29 +532,32 @@ export const removeCrewMember = async (req, res) => {
     }
 };
 
-// @desc    Get trip summary
+// @desc    Get trip summary (catch breakdown + trip meta)
 export const getTripSummary = async (req, res) => {
     try {
-        const trip = await Trip.findById(req.params.id);
+        const trip = await Trip.findById(req.params.id)
+            .populate('crew', 'name phone district')
+            .populate('catches');
+
         if (!trip) return res.status(404).json({ message: "Trip not found" });
 
         const summary = {
-            totalWeight: 0,
-            supermarketStock: 0,
-            customerStock: 0,
-            wasteProduct: 0,
-            catchBreakdown: {},
-            catchBreakdownDetails: {}
+            status:       trip.status,
+            totalWeight:  0,
+            catchCount:   trip.catches.length,
+            supermarketStock: 0,   // Grade A
+            customerStock:    0,   // Grade B
+            wasteProduct:     0,   // Grade C
+            catchBreakdown:       {},
+            catchBreakdownDetails: {},
+            crew: trip.crew
         };
 
-        // We need to populate catches to get their grades and weights
-        const tripWithCatches = await Trip.findById(req.params.id).populate('catches');
-
-        tripWithCatches.catches.forEach(c => {
+        trip.catches.forEach(c => {
             summary.totalWeight += c.weight;
             if (c.grade === 'Grade A') summary.supermarketStock += c.weight;
             else if (c.grade === 'Grade B') summary.customerStock += c.weight;
-            else if (c.grade === 'Grade C') summary.wasteProduct += c.weight;
+            else if (c.grade === 'Grade C') summary.wasteProduct  += c.weight;
 
             if (!summary.catchBreakdown[c.fishType]) summary.catchBreakdown[c.fishType] = 0;
             summary.catchBreakdown[c.fishType] += c.weight;
@@ -472,7 +565,7 @@ export const getTripSummary = async (req, res) => {
             if (!summary.catchBreakdownDetails[c.fishType]) {
                 summary.catchBreakdownDetails[c.fishType] = { gradeA: 0, gradeB: 0, gradeC: 0 };
             }
-            if (c.grade === 'Grade A') summary.catchBreakdownDetails[c.fishType].gradeA += c.weight;
+            if      (c.grade === 'Grade A') summary.catchBreakdownDetails[c.fishType].gradeA += c.weight;
             else if (c.grade === 'Grade B') summary.catchBreakdownDetails[c.fishType].gradeB += c.weight;
             else if (c.grade === 'Grade C') summary.catchBreakdownDetails[c.fishType].gradeC += c.weight;
         });
