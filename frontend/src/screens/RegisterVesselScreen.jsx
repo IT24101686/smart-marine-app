@@ -7,7 +7,8 @@ import {
     TouchableOpacity, 
     ScrollView, 
     Alert,
-    ActivityIndicator
+    ActivityIndicator,
+    Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,25 +16,32 @@ import { Ionicons } from '@expo/vector-icons';
 import client from '../api/client';
 import ImageUploadButton from '../components/ImageUploadButton';
 
-const RegisterVesselScreen = ({ navigation }) => {
+const RegisterVesselScreen = ({ navigation, route }) => {
+    const editVessel = route.params?.vessel;
     const [loading, setLoading] = useState(false);
-    const [name, setName] = useState('');
     const [vesselData, setVesselData] = useState({
-        vesselType: 'multi-day',
-        licenseNumber: '',
-        capacity: '',
-        image: '',
-        ownerCommission: '40',
-        plannerCommission: '10',
-        crewCommission: '50',
-        isAvailableForRent: false,
-        rentalPrice: '',
-        rentalPriceType: 'per-day'
+        name: editVessel?.name || '',
+        vesselType: editVessel?.vesselType || 'multi-day',
+        licenseNumber: editVessel?.licenseNumber || '',
+        capacity: editVessel?.capacity ? String(editVessel.capacity) : '',
+        photos: editVessel?.photos || [],
+        image: editVessel?.image || '',
+        ownerCommission: editVessel?.ownerCommission ? String(editVessel.ownerCommission) : '40',
+        plannerCommission: editVessel?.plannerCommission ? String(editVessel.plannerCommission) : '10',
+        crewCommission: editVessel?.crewCommission ? String(editVessel.crewCommission) : '50',
+        isAvailableForRent: editVessel?.isAvailableForRent || false,
+        rentalPrice: editVessel?.rentalPrice ? String(editVessel.rentalPrice) : '',
+        rentalPriceType: editVessel?.rentalPriceType || 'per-day'
     });
 
     const handleRegister = async () => {
-        if (!name || !vesselData.licenseNumber || !vesselData.capacity) {
+        if (!vesselData.name || !vesselData.licenseNumber || !vesselData.capacity) {
             Alert.alert("Error", "Please fill all required fields");
+            return;
+        }
+
+        if (vesselData.photos.length === 0) {
+            Alert.alert("Error", "Please upload at least one photo of the boat");
             return;
         }
 
@@ -48,18 +56,28 @@ const RegisterVesselScreen = ({ navigation }) => {
 
         setLoading(true);
         try {
-            await client.post('/api/vessels', { 
-                name, 
-                ...vesselData,
-                capacity: Number(vesselData.capacity),
-                ownerCommission: Number(vesselData.ownerCommission),
-                plannerCommission: Number(vesselData.plannerCommission),
-                crewCommission: Number(vesselData.crewCommission),
-                isAvailableForRent: vesselData.isAvailableForRent,
-                rentalPrice: vesselData.isAvailableForRent ? Number(vesselData.rentalPrice) : 0,
-                rentalPriceType: vesselData.isAvailableForRent ? vesselData.rentalPriceType : 'none'
-            });
-            Alert.alert("Success", "Vessel registered successfully!");
+            if (editVessel) {
+                await client.put(`/api/vessels/${editVessel._id}`, {
+                    ...vesselData,
+                    image: vesselData.photos[0],
+                    capacity: Number(vesselData.capacity),
+                    ownerCommission: Number(vesselData.ownerCommission),
+                    plannerCommission: Number(vesselData.plannerCommission),
+                    crewCommission: Number(vesselData.crewCommission),
+                    status: editVessel.status === 'maintenance' && vesselData.photos.length > 0 && vesselData.capacity > 0 ? 'available' : editVessel.status
+                });
+                Alert.alert("Success", "Vessel updated successfully!");
+            } else {
+                await client.post('/api/vessels', { 
+                    ...vesselData,
+                    image: vesselData.photos[0],
+                    capacity: Number(vesselData.capacity),
+                    ownerCommission: Number(vesselData.ownerCommission),
+                    plannerCommission: Number(vesselData.plannerCommission),
+                    crewCommission: Number(vesselData.crewCommission),
+                });
+                Alert.alert("Success", "Vessel registered successfully!");
+            }
             navigation.goBack();
         } catch (error) {
             Alert.alert("Error", error.response?.data?.message || "Registration failed");
@@ -76,7 +94,7 @@ const RegisterVesselScreen = ({ navigation }) => {
                         <TouchableOpacity onPress={() => navigation.goBack()}>
                             <Ionicons name="arrow-back" size={24} color="#fff" />
                         </TouchableOpacity>
-                        <Text style={styles.title}>Register Vessel</Text>
+                        <Text style={styles.title}>{editVessel ? 'Update Vessel' : 'Register Vessel'}</Text>
                         <View style={{ width: 24 }} />
                     </View>
                 </SafeAreaView>
@@ -84,19 +102,41 @@ const RegisterVesselScreen = ({ navigation }) => {
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
                 <View style={styles.card}>
-                    <Text style={styles.label}>Vessel Photo</Text>
-                    <ImageUploadButton 
-                        onImageUploaded={(url) => setVesselData({ ...vesselData, image: url })}
-                        folder="vessels"
-                        label="Upload Boat Image"
-                    />
+                    <Text style={styles.label}>Vessel Photos (බෝට්ටුවේ ඡායාරූප) *</Text>
+                    <View style={styles.photoGrid}>
+                        {vesselData.photos.map((url, index) => (
+                            <View key={index} style={styles.photoWrapper}>
+                                <Image source={{ uri: url }} style={styles.thumbnail} />
+                                <TouchableOpacity 
+                                    style={styles.removePhotoBtn}
+                                    onPress={() => {
+                                        const newPhotos = [...vesselData.photos];
+                                        newPhotos.splice(index, 1);
+                                        setVesselData({ ...vesselData, photos: newPhotos });
+                                    }}
+                                >
+                                    <Ionicons name="close-circle" size={20} color="#ef4444" />
+                                </TouchableOpacity>
+                            </View>
+                        ))}
+                        
+                        {vesselData.photos.length < 5 && (
+                            <ImageUploadButton 
+                                onImageUploaded={(url) => setVesselData({ ...vesselData, photos: [...vesselData.photos, url] })}
+                                folder="vessels"
+                                label={vesselData.photos.length === 0 ? "Upload Photos" : "Add More"}
+                                showPreview={false}
+                                style={styles.uploadBtn}
+                            />
+                        )}
+                    </View>
 
-                    <Text style={styles.label}>Vessel Name *</Text>
+                    <Text style={[styles.label, { marginTop: 15 }]}>Vessel Name (බෝට්ටුවේ නම) *</Text>
                     <TextInput 
                         style={styles.input}
                         placeholder="e.g. Blue Wave 01"
-                        value={name}
-                        onChangeText={setName}
+                        value={vesselData.name}
+                        onChangeText={(t) => setVesselData({ ...vesselData, name: t })}
                     />
 
                     <Text style={styles.label}>License Number *</Text>
@@ -197,7 +237,7 @@ const RegisterVesselScreen = ({ navigation }) => {
                         onPress={handleRegister}
                         disabled={loading}
                     >
-                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Register Vessel</Text>}
+                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>{editVessel ? 'Update Vessel' : 'Register Vessel'}</Text>}
                     </TouchableOpacity>
                 </View>
             </ScrollView>
@@ -239,7 +279,43 @@ const styles = StyleSheet.create({
     },
     purposeBtnActive: { backgroundColor: '#2563eb', borderColor: '#2563eb' },
     purposeText: { fontSize: 14, fontWeight: '700', color: '#64748b' },
-    purposeTextActive: { color: '#fff' }
+    purposeTextActive: { color: '#fff' },
+    photoGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+        marginBottom: 10,
+    },
+    photoWrapper: {
+        width: 80,
+        height: 80,
+        borderRadius: 12,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+    },
+    thumbnail: {
+        width: '100%',
+        height: '100%',
+    },
+    removePhotoBtn: {
+        position: 'absolute',
+        top: 2,
+        right: 2,
+        backgroundColor: '#fff',
+        borderRadius: 10,
+    },
+    uploadBtn: {
+        width: 80,
+        height: 80,
+        minWidth: 80,
+        borderRadius: 12,
+        borderStyle: 'dashed',
+        borderWidth: 1,
+        borderColor: '#2563eb',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
 });
 
 export default RegisterVesselScreen;

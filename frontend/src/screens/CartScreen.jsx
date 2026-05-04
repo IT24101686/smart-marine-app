@@ -19,23 +19,36 @@ const CartScreen = ({ route, navigation }) => {
     const [cart, setCart] = useState(initialCart);
     const [loading, setLoading] = useState(false);
 
-    const updateWeight = (id, delta) => {
-        setCart(prev => prev.map(item => {
-            if (item.id === id) {
+    const updateWeight = async (itemId, delta) => {
+        const updatedCart = cart.map(item => {
+            const id = item.id || item._id;
+            if (id === itemId) {
                 const newWeight = Math.max(0.5, item.weight + delta);
-                // Validation against available stock
                 if (newWeight > (item.availableStock || 999)) {
-                    Alert.alert("Stock Limit", `Only ${item.availableStock}kg available for this catch.`);
+                    Alert.alert("Stock Limit", `Only ${item.availableStock}kg available.`);
                     return item;
                 }
                 return { ...item, weight: newWeight };
             }
             return item;
-        }).filter(item => item.weight > 0));
+        }).filter(item => item.weight > 0);
+
+        setCart(updatedCart);
+        try {
+            await client.post('/api/users/cart', { cart: updatedCart });
+        } catch (e) {
+            console.error("Save cart error:", e);
+        }
     };
 
-    const removeItem = (id) => {
-        setCart(prev => prev.filter(item => item.id !== id));
+    const removeItem = async (itemId) => {
+        const updatedCart = cart.filter(item => (item.id || item._id) !== itemId);
+        setCart(updatedCart);
+        try {
+            await client.post('/api/users/cart', { cart: updatedCart });
+        } catch (e) {
+            console.error("Save cart error:", e);
+        }
     };
 
     const calculateTotal = () => {
@@ -48,25 +61,45 @@ const CartScreen = ({ route, navigation }) => {
         try {
             setLoading(true);
             
-            // We group items by buyerId because one order belongs to one buyer in our schema
-            // For simplicity, we assume all items in cart are from the same buyer or we process them separately
-            const buyerIds = [...new Set(cart.map(item => item.buyerId))];
+            // Group items by buyer and trip to match order schema
+            const groupings = {};
+            cart.forEach(item => {
+                const key = `${item.buyerId}-${item.tripId}`;
+                if (!groupings[key]) {
+                    groupings[key] = {
+                        buyerId: item.buyerId,
+                        tripId: item.tripId,
+                        items: [],
+                        total: 0
+                    };
+                }
+                groupings[key].items.push({
+                    inventoryId: item.id,
+                    fishType: item.fishType,
+                    weight: item.weight,
+                    price: item.price,
+                    grade: item.grade || 'Grade B'
+                });
+                groupings[key].total += (item.price * item.weight);
+            });
             
-            for (const buyerId of buyerIds) {
-                const itemsForBuyer = cart.filter(item => item.buyerId === buyerId);
-                const total = itemsForBuyer.reduce((acc, item) => acc + (item.price * item.weight), 0);
-
+            for (const key in groupings) {
+                const group = groupings[key];
                 await client.post('/api/orders', {
-                    buyerId,
-                    items: itemsForBuyer.map(item => ({
-                        fishType: item.fishType,
-                        weight: item.weight,
-                        price: item.price,
-                        grade: 'Grade B'
-                    })),
-                    totalPrice: total,
+                    buyerId: group.buyerId,
+                    tripId: group.tripId,
+                    items: group.items,
+                    totalPrice: group.total,
                     deliveryAddress: user?.address
                 });
+            }
+
+            // Clear Cart in DB and Local State after success
+            try {
+                await client.post('/api/users/cart', { cart: [] });
+                setCart([]); // Clear local state too!
+            } catch (e) {
+                console.error("Clear cart error:", e);
             }
 
             Alert.alert(
@@ -91,7 +124,20 @@ const CartScreen = ({ route, navigation }) => {
                             <Ionicons name="arrow-back" size={24} color="#fff" />
                         </TouchableOpacity>
                         <Text style={styles.title}>Your Shopping Cart</Text>
-                        <View style={{ width: 40 }} />
+                        <TouchableOpacity 
+                            onPress={() => {
+                                Alert.alert("Clear Cart", "Do you want to remove everything?", [
+                                    { text: "Cancel" },
+                                    { text: "Clear All", onPress: () => {
+                                        setCart([]);
+                                        client.post('/api/users/cart', { cart: [] });
+                                    }, style: 'destructive' }
+                                ]);
+                            }}
+                            style={styles.clearBtn}
+                        >
+                            <Ionicons name="trash-outline" size={22} color="#fff" />
+                        </TouchableOpacity>
                     </View>
                 </SafeAreaView>
             </LinearGradient>
@@ -117,15 +163,15 @@ const CartScreen = ({ route, navigation }) => {
                             </View>
                             <View style={styles.rightSection}>
                                 <View style={styles.quantityControls}>
-                                    <TouchableOpacity onPress={() => updateWeight(item.id, -0.5)} style={styles.qtyBtn}>
+                                    <TouchableOpacity onPress={() => updateWeight(item.id || item._id, -0.5)} style={styles.qtyBtn}>
                                         <Ionicons name="remove" size={18} color="#1e293b" />
                                     </TouchableOpacity>
                                     <Text style={styles.qtyValue}>{item.weight.toFixed(1)}kg</Text>
-                                    <TouchableOpacity onPress={() => updateWeight(item.id, 0.5)} style={styles.qtyBtn}>
+                                    <TouchableOpacity onPress={() => updateWeight(item.id || item._id, 0.5)} style={styles.qtyBtn}>
                                         <Ionicons name="add" size={18} color="#1e293b" />
                                     </TouchableOpacity>
                                 </View>
-                                <TouchableOpacity onPress={() => removeItem(item.id)} style={styles.removeBtn}>
+                                <TouchableOpacity onPress={() => removeItem(item.id || item._id)} style={styles.removeBtn}>
                                     <Text style={styles.removeText}>Remove</Text>
                                 </TouchableOpacity>
                             </View>
@@ -171,27 +217,48 @@ const CartScreen = ({ route, navigation }) => {
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
     header: { paddingBottom: 20 },
-    headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 10 },
-    backBtn: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center' },
-    title: { color: '#fff', fontSize: 18, fontWeight: '800' },
-    scrollContent: { padding: 20 },
+    headerContent: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        justifyContent: 'space-between', 
+        paddingHorizontal: 24, 
+        paddingTop: 10 
+    },
+    backBtn: { 
+        width: 45, 
+        height: 45, 
+        borderRadius: 15, 
+        backgroundColor: 'rgba(255,255,255,0.15)', 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+    },
+    title: { color: '#fff', fontSize: 20, fontWeight: '900', letterSpacing: 0.5 },
+    clearBtn: { 
+        width: 45, 
+        height: 45, 
+        borderRadius: 15, 
+        backgroundColor: 'rgba(239, 68, 68, 0.3)', 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+    },
+    scrollContent: { padding: 20, paddingBottom: 100 },
     cartItem: { 
         flexDirection: 'row', 
         backgroundColor: '#fff', 
-        borderRadius: 24, 
-        padding: 12, 
+        borderRadius: 28, 
+        padding: 16, 
         marginBottom: 16, 
         alignItems: 'center', 
-        elevation: 4,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
+        elevation: 8,
+        shadowColor: '#1e293b',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.06,
+        shadowRadius: 16,
     },
     itemImageContainer: { 
-        width: 80, 
-        height: 80, 
-        borderRadius: 18, 
+        width: 85, 
+        height: 85, 
+        borderRadius: 20, 
         backgroundColor: '#f1f5f9', 
         justifyContent: 'center', 
         alignItems: 'center',
@@ -202,14 +269,15 @@ const styles = StyleSheet.create({
         height: '100%',
         resizeMode: 'cover',
     },
-    itemDetails: { flex: 1, marginLeft: 12 },
-    itemName: { fontSize: 16, fontWeight: '800', color: '#1e293b' },
-    sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-    itemSource: { fontSize: 11, color: '#64748b', fontWeight: '600' },
-    itemPrice: { fontSize: 15, fontWeight: '800', color: '#2563eb', marginTop: 8 },
+    itemDetails: { flex: 1, marginLeft: 16 },
+    itemName: { fontSize: 16, fontWeight: '900', color: '#0f172a', marginBottom: 2 },
+    sourceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },
+    itemSource: { fontSize: 11, color: '#94a3b8', fontWeight: '700' },
+    itemPrice: { fontSize: 15, fontWeight: '900', color: '#2563eb', marginTop: 10 },
     rightSection: {
         alignItems: 'flex-end',
-        gap: 8,
+        justifyContent: 'space-between',
+        height: 80,
     },
     quantityControls: { 
         flexDirection: 'row', 
@@ -217,31 +285,70 @@ const styles = StyleSheet.create({
         backgroundColor: '#f8fafc',
         borderRadius: 12,
         padding: 4,
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
     },
-    qtyBtn: { width: 28, height: 28, borderRadius: 8, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', elevation: 1 },
-    qtyValue: { fontSize: 13, fontWeight: '800', color: '#1e293b', minWidth: 45, textAlign: 'center' },
-    removeBtn: { paddingHorizontal: 8 },
-    removeText: { color: '#ef4444', fontSize: 11, fontWeight: '700' },
+    qtyBtn: { 
+        width: 26, 
+        height: 26, 
+        borderRadius: 8, 
+        backgroundColor: '#fff', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        elevation: 2,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    qtyValue: { fontSize: 12, fontWeight: '900', color: '#0f172a', minWidth: 40, textAlign: 'center' },
+    removeBtn: { padding: 4 },
+    removeText: { color: '#ef4444', fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
     footer: { 
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
         backgroundColor: '#fff', 
         padding: 24, 
-        borderTopLeftRadius: 36, 
-        borderTopRightRadius: 36, 
-        elevation: 25,
+        paddingBottom: 34,
+        borderTopLeftRadius: 40, 
+        borderTopRightRadius: 40, 
+        elevation: 30,
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -10 },
+        shadowOffset: { width: 0, height: -15 },
         shadowOpacity: 0.1,
-        shadowRadius: 20,
+        shadowRadius: 25,
     },
     totalRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-    totalLabel: { fontSize: 13, color: '#64748b', fontWeight: '700', textTransform: 'uppercase' },
-    totalValue: { fontSize: 26, fontWeight: '900', color: '#0f172a' },
-    checkoutBtn: { height: 64, backgroundColor: '#0f172a', borderRadius: 20, flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 12 },
-    checkoutBtnText: { color: '#fff', fontSize: 18, fontWeight: '800' },
-    emptyCart: { alignItems: 'center', marginTop: 100 },
-    emptyText: { fontSize: 18, color: '#94a3b8', fontWeight: '600', marginTop: 20 },
-    shopBtn: { marginTop: 24, paddingHorizontal: 32, paddingVertical: 16, backgroundColor: '#2563eb', borderRadius: 18 },
-    shopBtnText: { color: '#fff', fontWeight: '800', fontSize: 16 }
+    totalLabel: { fontSize: 11, color: '#94a3b8', fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
+    totalValue: { fontSize: 24, fontWeight: '900', color: '#0f172a' },
+    checkoutBtn: { 
+        height: 64, 
+        backgroundColor: '#0f172a', 
+        borderRadius: 22, 
+        flexDirection: 'row', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        gap: 12,
+        elevation: 12,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+    },
+    checkoutBtnText: { color: '#fff', fontSize: 18, fontWeight: '900', letterSpacing: 0.5 },
+    emptyCart: { alignItems: 'center', marginTop: 120, paddingHorizontal: 40 },
+    emptyText: { fontSize: 18, color: '#94a3b8', fontWeight: '700', marginTop: 24, textAlign: 'center' },
+    shopBtn: { 
+        marginTop: 30, 
+        paddingHorizontal: 36, 
+        paddingVertical: 18, 
+        backgroundColor: '#2563eb', 
+        borderRadius: 20,
+        elevation: 8,
+    },
+    shopBtnText: { color: '#fff', fontWeight: '900', fontSize: 16 }
 });
 
 export default CartScreen;

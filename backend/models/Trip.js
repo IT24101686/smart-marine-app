@@ -1,32 +1,32 @@
 import mongoose from 'mongoose';
 
 const tripSchema = new mongoose.Schema({
-    vesselId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'Vessel', 
-        required: true 
+    vesselId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Vessel',
+        required: true
     },
-    plannerId: { 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User', 
-        required: true 
+    plannerId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     },
-    crew: [{ 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User' 
+    crew: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
     }],
-    requests: [{ 
-        type: mongoose.Schema.Types.ObjectId, 
-        ref: 'User' 
+    requests: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
     }],
     maxFishermen: { type: Number, required: true },
     minFishermen: { type: Number, default: 1 },
     departureTime: { type: Date, required: true },
     returnTime: { type: Date },
-    tripType: { 
-        type: String, 
-        enum: ['direct', 'rental'], 
-        default: 'direct' 
+    tripType: {
+        type: String,
+        enum: ['direct', 'rental'],
+        default: 'direct'
     },
     rentalAmount: { type: Number },
     plannedDuration: { type: String }, // e.g., "3 days", "1 week"
@@ -62,7 +62,13 @@ const tripSchema = new mongoose.Schema({
         isPresent: { type: Boolean, default: false },
         markedAt: { type: Date, default: Date.now }
     }],
-    isAttendanceMarked: { type: Boolean, default: false }
+    isAttendanceMarked: { type: Boolean, default: false },
+    crewRatings: [{
+        userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        rating: { type: Number, min: 1, max: 5 },
+        comment: String,
+        ratedAt: { type: Date, default: Date.now }
+    }]
 }, { timestamps: true });
 
 

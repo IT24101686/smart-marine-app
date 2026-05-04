@@ -77,16 +77,44 @@ const BoatOwnerDashboardScreen = ({ navigation }) => {
 
     const renderVesselCard = ({ item }) => {
         const getStatusInfo = (status, isRentable) => {
+            if (status === 'maintenance') return { label: 'IN MAINTENANCE (අලුත්වැඩියාවේ)', color: '#f97316', bg: '#fff7ed' };
+            if (status === 'service-due') return { label: 'SERVICE DUE (සර්විස් අවශ්‍යයි)', color: '#dc2626', bg: '#fef2f2' };
             if (status === 'in-sea') return { label: 'ON TRIP (මුහුදු ගොස් ඇත)', color: '#ef4444', bg: '#fef2f2' };
             if (status === 'rented') return { label: 'RENTED (කුලියට දී ඇත)', color: '#7c3aed', bg: '#f5f3ff' };
             if (isRentable) return { label: 'FOR RENT (කුලියට දීමට ඇත)', color: '#2563eb', bg: '#eff6ff' };
             return { label: 'AVAILABLE (තිබේ)', color: '#16a34a', bg: '#f0fdf4' };
         };
 
+        const getMaintenanceInfo = (nextDate) => {
+            if (!nextDate) return { label: 'No Schedule', color: '#64748b', bg: '#f1f5f9' };
+            const today = new Date();
+            today.setHours(0,0,0,0);
+            const due = new Date(nextDate);
+            due.setHours(0,0,0,0);
+            const diff = due - today;
+            const days = Math.ceil(diff / (1000 * 60 * 60 * 24));
+            
+            if (days < 0) return { label: 'OVERDUE (ප්‍රමාද වී ඇත)', color: '#ef4444', bg: '#fee2e2' };
+            if (days <= 7) return { label: days === 0 ? 'DUE TODAY' : `DUE IN ${days} DAYS`, color: '#f59e0b', bg: '#fef3c7' };
+            return { label: `Next: ${due.toLocaleDateString()}`, color: '#16a34a', bg: '#dcfce7' };
+        };
+
         const statusInfo = getStatusInfo(item.status, item.isAvailableForRent);
+        const maintInfo  = getMaintenanceInfo(item.nextMaintenanceDate);
+        const isIncomplete = !item.photos || item.photos.length === 0 || !item.capacity;
 
         return (
-            <TouchableOpacity style={styles.vesselCard} activeOpacity={0.9}>
+            <TouchableOpacity 
+                style={[styles.vesselCard, isIncomplete && styles.incompleteCard]} 
+                activeOpacity={0.9}
+            >
+                {isIncomplete && (
+                    <View style={styles.incompleteBanner}>
+                        <Ionicons name="alert-circle" size={16} color="#fff" />
+                        <Text style={styles.incompleteBannerText}>Please complete your boat profile to start trips</Text>
+                    </View>
+                )}
+                
                 <View style={styles.imageContainer}>
                     <Image 
                         source={item.image ? { uri: item.image } : require('../../assets/adaptive-icon.png')} 
@@ -98,6 +126,12 @@ const BoatOwnerDashboardScreen = ({ navigation }) => {
                             {statusInfo.label}
                         </Text>
                     </View>
+                    
+                    {/* Maintenance Tag */}
+                    <View style={[styles.maintBadge, { backgroundColor: maintInfo.bg }]}>
+                        <Ionicons name="construct" size={10} color={maintInfo.color} />
+                        <Text style={[styles.maintText, { color: maintInfo.color }]}>{maintInfo.label}</Text>
+                    </View>
                 </View>
 
                 <View style={styles.cardContent}>
@@ -107,45 +141,55 @@ const BoatOwnerDashboardScreen = ({ navigation }) => {
                     <View style={styles.detailsGrid}>
                         <View style={styles.detailBox}>
                             <Ionicons name="barbell" size={16} color="#64748b" />
-                            <Text style={styles.detailVal}>{item.capacity}kg</Text>
+                            <Text style={styles.detailVal}>{item.capacity || 0}kg</Text>
                             <Text style={styles.detailLabel}>Capacity</Text>
                         </View>
                         <View style={styles.detailBox}>
                             <Ionicons name="people" size={16} color="#64748b" />
-                            <Text style={styles.detailVal}>{item.crewCommission}%</Text>
+                            <Text style={styles.detailVal}>{item.crewCommission || 50}%</Text>
                             <Text style={styles.detailLabel}>Crew Share</Text>
                         </View>
-                        {item.isAvailableForRent && (
-                            <View style={styles.detailBox}>
-                                <Ionicons name="cash" size={16} color="#2563eb" />
-                                <Text style={[styles.detailVal, { color: '#2563eb' }]}>LKR {item.rentalPrice}</Text>
-                                <Text style={styles.detailLabel}>Rate</Text>
-                            </View>
-                        )}
                     </View>
 
                     <View style={styles.actionRow}>
-                        <TouchableOpacity 
-                            style={[
-                                styles.mainAction, 
-                                { backgroundColor: item.isAvailableForRent || item.status === 'rented' ? '#cbd5e1' : '#2563eb' }
-                            ]}
-                            onPress={() => {
-                                if (item.isAvailableForRent || item.status === 'rented') {
-                                    Alert.alert("Boat Listed for Rent", "This boat is currently listed for rent. To plan your own trips, please remove it from the rental market first.");
-                                } else {
-                                    navigation.navigate('CreateTrip', { vessel: item });
-                                }
-                            }}
-                        >
-                            <Text style={styles.mainActionText}>Plan Trip</Text>
-                        </TouchableOpacity>
+                        {isIncomplete ? (
+                            <TouchableOpacity 
+                                style={[styles.mainAction, { backgroundColor: '#f97316' }]}
+                                onPress={() => navigation.navigate('RegisterVessel', { vessel: item })}
+                            >
+                                <Ionicons name="create" size={18} color="#fff" />
+                                <Text style={styles.mainActionText}>Complete Profile</Text>
+                            </TouchableOpacity>
+                        ) : (
+                            <TouchableOpacity 
+                                style={[
+                                    styles.mainAction, 
+                                    { backgroundColor: item.isAvailableForRent || item.status === 'rented' ? '#cbd5e1' : '#2563eb' }
+                                ]}
+                                onPress={() => {
+                                    if (item.isAvailableForRent || item.status === 'rented') {
+                                        Alert.alert("Boat Listed for Rent", "This boat is currently listed for rent. To plan your own trips, please remove it from the rental market first.");
+                                    } else {
+                                        navigation.navigate('CreateTrip', { vessel: item });
+                                    }
+                                }}
+                            >
+                                <Text style={styles.mainActionText}>Plan Trip</Text>
+                            </TouchableOpacity>
+                        )}
                         
                         <TouchableOpacity 
                             style={styles.secondaryAction}
                             onPress={() => handleRentOut(item._id, item.status, item.isAvailableForRent)}
                         >
                             <Ionicons name={item.isAvailableForRent ? "eye-off" : "megaphone"} size={20} color="#64748b" />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity 
+                            style={styles.secondaryAction}
+                            onPress={() => handleMaintenance(item)}
+                        >
+                            <Ionicons name="construct-outline" size={20} color="#f59e0b" />
                         </TouchableOpacity>
 
                         <TouchableOpacity 
@@ -157,6 +201,55 @@ const BoatOwnerDashboardScreen = ({ navigation }) => {
                     </View>
                 </View>
             </TouchableOpacity>
+        );
+    };
+
+    const handleMaintenance = (vessel) => {
+        Alert.alert(
+            "Maintenance Record",
+            `Update maintenance for ${vessel.name}`,
+            [
+                { text: "Cancel", style: "cancel" },
+                { 
+                    text: "Record Service Today", 
+                    onPress: async () => {
+                        const today = new Date();
+                        const nextMonth = new Date();
+                        nextMonth.setMonth(today.getMonth() + 1); // Default next service in 1 month
+
+                        try {
+                            setLoading(true);
+                            await client.post(`/api/vessels/${vessel._id}/maintenance`, {
+                                lastMaintenanceDate: today,
+                                nextMaintenanceDate: nextMonth,
+                                notes: "Routine maintenance",
+                                status: 'available'
+                            });
+                            Alert.alert("Success", "Maintenance recorded. Next service scheduled in 1 month.");
+                            loadData();
+                        } catch (e) {
+                            Alert.alert("Error", "Failed to update record");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                },
+                {
+                    text: "Start Repairs",
+                    onPress: async () => {
+                        try {
+                            setLoading(true);
+                            await client.put(`/api/vessels/${vessel._id}/status`, { status: 'maintenance' });
+                            Alert.alert("Success", "Vessel status set to Maintenance");
+                            loadData();
+                        } catch (e) {
+                            Alert.alert("Error", "Failed to update status");
+                        } finally {
+                            setLoading(false);
+                        }
+                    }
+                }
+            ]
         );
     };
 
@@ -334,6 +427,23 @@ const styles = StyleSheet.create({
         shadowRadius: 12,
         elevation: 3,
     },
+    incompleteCard: {
+        borderColor: '#f97316',
+        borderWidth: 1,
+    },
+    incompleteBanner: {
+        backgroundColor: '#f97316',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingVertical: 6,
+        gap: 6,
+    },
+    incompleteBannerText: {
+        color: '#fff',
+        fontSize: 11,
+        fontWeight: '700',
+    },
     vesselImage: {
         width: '100%',
         height: 160,
@@ -372,6 +482,21 @@ const styles = StyleSheet.create({
     },
     statusText: {
         fontSize: 10,
+        fontWeight: '800',
+    },
+    maintBadge: {
+        position: 'absolute',
+        top: 15,
+        left: 15,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    maintText: {
+        fontSize: 9,
         fontWeight: '800',
     },
     actionGrid: {

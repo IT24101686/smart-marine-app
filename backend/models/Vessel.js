@@ -24,7 +24,7 @@ const vesselSchema = new mongoose.Schema({
     },
     status: { 
         type: String, 
-        enum: ['available', 'in-sea', 'rented', 'maintenance'], 
+        enum: ['available', 'in-sea', 'rented', 'maintenance', 'service-due'], 
         default: 'available' 
     },
     photos: [{ type: String }],
@@ -36,7 +36,10 @@ const vesselSchema = new mongoose.Schema({
     rentStartDate: { type: Date },
     ownerCommission: { type: Number, default: 40 }, // % to Owner
     plannerCommission: { type: Number, default: 10 }, // % to Planner
-    crewCommission: { type: Number, default: 50 } // % to be shared among crew
+    crewCommission: { type: Number, default: 50 }, // % to be shared among crew
+    lastMaintenanceDate: { type: Date },
+    nextMaintenanceDate: { type: Date },
+    maintenanceNotes: { type: String }
 }, { timestamps: true });
 
 const Vessel = mongoose.model('Vessel', vesselSchema);

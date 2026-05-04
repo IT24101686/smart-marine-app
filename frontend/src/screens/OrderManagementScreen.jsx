@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    FlatList, 
-    TouchableOpacity, 
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
     ActivityIndicator,
     Alert,
-    Dimensions
+    Dimensions,
+    Modal,
+    ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -23,6 +25,8 @@ const OrderManagementScreen = ({ navigation }) => {
     const [orders, setOrders] = useState([]);
     const [user, setUser] = useState(null);
     const [expandedMapId, setExpandedMapId] = useState(null);
+    const [selectedOrderForInvoice, setSelectedOrderForInvoice] = useState(null);
+    const [invoiceVisible, setInvoiceVisible] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -60,8 +64,8 @@ const OrderManagementScreen = ({ navigation }) => {
             "Are you sure you want to cancel this order?",
             [
                 { text: "No", style: "cancel" },
-                { 
-                    text: "Yes, Cancel", 
+                {
+                    text: "Yes, Cancel",
                     style: "destructive",
                     onPress: async () => {
                         try {
@@ -78,6 +82,20 @@ const OrderManagementScreen = ({ navigation }) => {
     };
 
 
+    const handlePayOrder = async (orderId) => {
+        try {
+            setLoading(true);
+            await client.put(`/api/orders/${orderId}/pay`);
+            Alert.alert("Success 🎉", "Payment successful! Your order is now being processed for delivery.");
+            fetchOrders(user.role);
+        } catch (error) {
+            console.error("Payment error:", error);
+            Alert.alert("Error", error.response?.data?.message || "Payment failed");
+        } finally {
+            setLoading(false);
+        }
+    };
+
     const updateStatus = async (orderId, newStatus) => {
         try {
             await client.put(`/api/orders/${orderId}/status`, { status: newStatus });
@@ -92,6 +110,7 @@ const OrderManagementScreen = ({ navigation }) => {
         switch (status) {
             case 'pending': return '#f59e0b';
             case 'confirmed': return '#3b82f6';
+            case 'paid': return '#8b5cf6';
             case 'delivered': return '#10b981';
             case 'cancelled': return '#ef4444';
             default: return '#64748b';
@@ -108,7 +127,7 @@ const OrderManagementScreen = ({ navigation }) => {
                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
                     <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
                     <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                        {item.status.toUpperCase()}
+                        {item.status === 'processing' ? 'PROCESSING' : item.status.toUpperCase()}
                     </Text>
                 </View>
             </View>
@@ -116,8 +135,11 @@ const OrderManagementScreen = ({ navigation }) => {
             <View style={styles.itemsSection}>
                 {item.items.map((it, idx) => (
                     <View key={idx} style={styles.itemRow}>
-                        <Ionicons name="fish" size={16} color="#64748b" />
-                        <Text style={styles.itemText}>{it.fishType} ({it.weight}kg)</Text>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                            <Ionicons name="fish" size={16} color="#64748b" />
+                            <Text style={styles.itemText}>{it.fishType} ({it.weight}kg)</Text>
+                        </View>
+                        <Text style={styles.itemPriceText}>LKR {it.price?.toLocaleString()}/kg</Text>
                     </View>
                 ))}
             </View>
@@ -144,38 +166,61 @@ const OrderManagementScreen = ({ navigation }) => {
                     <Text style={styles.totalLabel}>Total Amount</Text>
                     <Text style={styles.totalPrice}>LKR {item.totalPrice?.toLocaleString()}</Text>
                 </View>
-                
+
                 {user?.role === 'customer' && item.status === 'pending' && (
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={styles.customerCancelBtn}
                         onPress={() => handleCancelOrder(item._id)}
                     >
                         <Text style={styles.cancelText}>Cancel</Text>
                     </TouchableOpacity>
                 )}
-                
+
+                {user?.role === 'customer' && item.status === 'confirmed' && (
+                    <TouchableOpacity
+                        style={[styles.actionBtn, { backgroundColor: '#8b5cf6', flex: 1, marginRight: 10 }]}
+                        onPress={() => handlePayOrder(item._id)}
+                    >
+                        <Ionicons name="card-outline" size={20} color="#fff" />
+                        <Text style={styles.btnText}>Pay Now</Text>
+                    </TouchableOpacity>
+                )}
+
                 {user?.role === 'customer' && (
-                    <TouchableOpacity 
-                        style={[styles.actionBtn, styles.trackBtn, { width: 140 }]}
+                    <TouchableOpacity
+                        style={[styles.actionBtn, styles.invoiceBtn]}
+                        onPress={() => {
+                            setSelectedOrderForInvoice(item);
+                            setInvoiceVisible(true);
+                        }}
+                    >
+                        <Ionicons name="receipt-outline" size={18} color="#059669" />
+                        <Text style={[styles.btnText, { color: '#059669' }]}>Invoice</Text>
+                    </TouchableOpacity>
+                )}
+
+                {user?.role === 'customer' && (
+                    <TouchableOpacity
+                        style={[styles.actionBtn, styles.trackBtn, { flex: 1 }]}
                         onPress={() => setExpandedMapId(expandedMapId === item._id ? null : item._id)}
                     >
                         <Ionicons name="map-outline" size={18} color="#2563eb" />
                         <Text style={[styles.btnText, { color: '#2563eb' }]}>
-                            {expandedMapId === item._id ? "Close Map" : "Track"}
+                            {expandedMapId === item._id ? "Close" : "Track"}
                         </Text>
                     </TouchableOpacity>
                 )}
             </View>
 
-            {user?.role === 'main_buyer' && item.status === 'pending' && (
+            {user?.role === 'main_buyer' && (item.status === 'pending' || item.status === 'processing') && (
                 <View style={styles.actionButtons}>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.actionBtn, styles.confirmBtn]}
                         onPress={() => updateStatus(item._id, 'confirmed')}
                     >
                         <Text style={styles.btnText}>Accept Order</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                         style={[styles.actionBtn, styles.cancelBtn]}
                         onPress={() => updateStatus(item._id, 'cancelled')}
                     >
@@ -185,20 +230,31 @@ const OrderManagementScreen = ({ navigation }) => {
             )}
 
             {user?.role === 'main_buyer' && item.status === 'confirmed' && (
-                <TouchableOpacity 
-                    style={[styles.actionBtn, styles.deliverBtn]}
-                    onPress={() => updateStatus(item._id, 'delivered')}
-                >
-                    <Ionicons name="bicycle" size={20} color="#fff" />
-                    <Text style={styles.btnText}>Mark as Delivered</Text>
-                </TouchableOpacity>
+                <View style={styles.actionButtons}>
+                    <TouchableOpacity
+                        style={[styles.actionBtn, { backgroundColor: '#10b981' }]}
+                        onPress={() => updateStatus(item._id, 'delivered')}
+                    >
+                        <Ionicons name="checkmark-circle" size={18} color="#fff" />
+                        <Text style={styles.btnText}>Delivered</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                        style={[styles.actionBtn, styles.trackBtn, { flex: 1 }]}
+                        onPress={() => setExpandedMapId(expandedMapId === item._id ? null : item._id)}
+                    >
+                        <Ionicons name="map-outline" size={18} color="#2563eb" />
+                        <Text style={[styles.btnText, { color: '#2563eb' }]}>Route</Text>
+                    </TouchableOpacity>
+                </View>
             )}
 
             {expandedMapId === item._id && (
                 <View style={styles.mapWrapper}>
-                    <MapComponent 
-                        address1={item.buyerId?.address} 
-                        address2={item.deliveryAddress} 
+                    <MapComponent
+                        address1={item.buyerId?.address}
+                        address2={item.deliveryAddress}
+                        coord1={item.buyerId?.latitude ? { lat: item.buyerId.latitude, lon: item.buyerId.longitude } : null}
+                        coord2={item.customerId?.latitude ? { lat: item.customerId.latitude, lon: item.customerId.longitude } : null}
                     />
                     <View style={styles.mapLabel}>
                         <Text style={styles.mapLabelText}>Tracking Delivery Route</Text>
@@ -243,21 +299,157 @@ const OrderManagementScreen = ({ navigation }) => {
                     }
                 />
             )}
+
+            {/* ══════════ DIGITAL INVOICE MODAL ══════════ */}
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={invoiceVisible}
+                onRequestClose={() => setInvoiceVisible(false)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={styles.invoiceModal}>
+                        <View style={styles.invoiceHeader}>
+                            <TouchableOpacity onPress={() => setInvoiceVisible(false)}>
+                                <Ionicons name="close-circle" size={30} color="#64748b" />
+                            </TouchableOpacity>
+                            <Text style={styles.invoiceTitle}>DIGITAL INVOICE</Text>
+                            <TouchableOpacity onPress={() => Alert.alert("Download", "Invoice downloaded to your device!")}>
+                                <Ionicons name="download-outline" size={24} color="#2563eb" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView showsVerticalScrollIndicator={false}>
+                            {/* Brand Header */}
+                            <View style={styles.brandHeader}>
+                                <LinearGradient colors={['#1e3a8a', '#1e40af']} style={styles.logoCircle}>
+                                    <Ionicons name="fish" size={30} color="#fff" />
+                                </LinearGradient>
+                                <View style={{ marginLeft: 15 }}>
+                                    <Text style={styles.brandName}>මාළු කඩේ</Text>
+                                    <Text style={styles.brandTagline}>Fresh from the ocean to your home</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.invoiceMeta}>
+                                <View>
+                                    <Text style={styles.metaLabel}>INVOICE TO</Text>
+                                    <Text style={styles.metaValue}>{user?.name}</Text>
+                                    <Text style={styles.metaSub}>{selectedOrderForInvoice?.deliveryAddress}</Text>
+                                </View>
+                                <View style={{ alignItems: 'flex-end' }}>
+                                    <Text style={styles.metaLabel}>INVOICE NO</Text>
+                                    <Text style={styles.metaValue}>#{selectedOrderForInvoice?._id.slice(-8).toUpperCase()}</Text>
+                                    <Text style={styles.metaLabel}>DATE</Text>
+                                    <Text style={styles.metaValue}>{new Date(selectedOrderForInvoice?.createdAt).toLocaleDateString()}</Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.invoiceTable}>
+                                <View style={styles.tableHeader}>
+                                    <Text style={[styles.tableHeaderText, { flex: 2 }]}>DESCRIPTION</Text>
+                                    <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'center' }]}>QTY</Text>
+                                    <Text style={[styles.tableHeaderText, { flex: 1, textAlign: 'right' }]}>TOTAL</Text>
+                                </View>
+
+                                {selectedOrderForInvoice?.items.map((it, idx) => (
+                                    <View key={idx} style={styles.tableRow}>
+                                        <Text style={[styles.tableRowText, { flex: 2 }]}>{it.fishType}</Text>
+                                        <Text style={[styles.tableRowText, { flex: 1, textAlign: 'center' }]}>{it.weight} kg</Text>
+                                        <Text style={[styles.tableRowText, { flex: 1, textAlign: 'right', fontWeight: '900' }]}>
+                                            LKR {(it.price * it.weight).toLocaleString()}
+                                        </Text>
+                                    </View>
+                                ))}
+                            </View>
+
+                            <View style={styles.invoiceSummary}>
+                                <View style={styles.summaryRow}>
+                                    <Text style={styles.summaryLabel}>Subtotal</Text>
+                                    <Text style={styles.summaryValue}>LKR {selectedOrderForInvoice?.totalPrice?.toLocaleString()}</Text>
+                                </View>
+                                <View style={styles.summaryRow}>
+                                    <Text style={styles.summaryLabel}>Delivery Fee</Text>
+                                    <Text style={styles.summaryValue}>LKR 250</Text>
+                                </View>
+                                <View style={styles.divider} />
+                                <View style={styles.summaryRow}>
+                                    <Text style={[styles.summaryLabel, { fontSize: 18, color: '#0f172a' }]}>Total</Text>
+                                    <Text style={[styles.summaryValue, { fontSize: 22, color: '#1e3a8a', fontWeight: '900' }]}>
+                                        LKR {(selectedOrderForInvoice?.totalPrice + 250).toLocaleString()}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <View style={styles.paymentInfo}>
+                                <Text style={styles.payLabel}>Payment Method: {selectedOrderForInvoice?.status === 'paid' ? 'Paid via Online' : 'Cash on Delivery'}</Text>
+                                <View style={styles.statusStamp}>
+                                    <Text style={[styles.statusStampText, { color: selectedOrderForInvoice?.status === 'paid' ? '#10b981' : '#f59e0b' }]}>
+                                        {selectedOrderForInvoice?.status === 'paid' ? 'PAID' : 'PENDING'}
+                                    </Text>
+                                </View>
+                            </View>
+
+                            <Text style={styles.thankYouText}>Thank you for your purchase! Come again.</Text>
+                        </ScrollView>
+
+                        <TouchableOpacity style={styles.closeBtn} onPress={() => setInvoiceVisible(false)}>
+                            <Text style={styles.closeBtnText}>Done</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#f8fafc' },
-    header: { paddingBottom: 25, borderBottomLeftRadius: 32, borderBottomRightRadius: 32 },
-    headerContent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 10 },
-    title: { color: '#fff', fontSize: 22, fontWeight: '800' },
-    listContent: { padding: 24 },
-    orderCard: { backgroundColor: '#fff', borderRadius: 28, padding: 20, marginBottom: 20, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 15 },
-    cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 15 },
-    orderId: { fontSize: 18, fontWeight: '800', color: '#1e293b' },
-    orderDate: { fontSize: 13, color: '#64748b', marginTop: 2, fontWeight: '600' },
-    statusBadge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
+    header: { paddingBottom: 20 },
+    headerContent: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        justifyContent: 'space-between', 
+        paddingHorizontal: 24, 
+        paddingTop: 10 
+    },
+    backBtn: { 
+        width: 45, 
+        height: 45, 
+        borderRadius: 15, 
+        backgroundColor: 'rgba(255,255,255,0.15)', 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+    },
+    title: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 0.5 },
+    listContent: { padding: 20 },
+    orderCard: { 
+        backgroundColor: '#fff', 
+        borderRadius: 28, 
+        padding: 20, 
+        marginBottom: 20,
+        elevation: 8,
+        shadowColor: '#1e293b',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+    },
+    cardHeader: { 
+        flexDirection: 'row', 
+        justifyContent: 'space-between', 
+        alignItems: 'flex-start',
+        marginBottom: 16,
+    },
+    orderId: { fontSize: 16, fontWeight: '900', color: '#0f172a', marginBottom: 2 },
+    orderDate: { fontSize: 12, color: '#94a3b8', fontWeight: '600' },
+    statusBadge: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        paddingHorizontal: 12, 
+        paddingVertical: 6, 
+        borderRadius: 12,
+        gap: 6,
+    },
     statusDot: { width: 6, height: 6, borderRadius: 3 },
     statusText: { fontSize: 11, fontWeight: '800' },
     detailsSection: { backgroundColor: '#f8fafc', borderRadius: 20, padding: 15, marginBottom: 15 },
@@ -265,8 +457,9 @@ const styles = StyleSheet.create({
     iconCircle: { width: 28, height: 28, borderRadius: 10, backgroundColor: '#fff', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0' },
     detailText: { fontSize: 14, color: '#475569', fontWeight: '600', flex: 1 },
     itemsSection: { marginBottom: 15, paddingHorizontal: 5 },
-    itemRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-    itemText: { fontSize: 15, color: '#1e293b', fontWeight: '700' },
+    itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+    itemText: { fontSize: 14, color: '#1e293b', fontWeight: '700' },
+    itemPriceText: { fontSize: 13, color: '#2563eb', fontWeight: '800' },
     footerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 5 },
     totalLabel: { fontSize: 11, color: '#64748b', fontWeight: '700', textTransform: 'uppercase' },
     totalPrice: { fontSize: 20, fontWeight: '900', color: '#1e3a8a' },
@@ -278,6 +471,38 @@ const styles = StyleSheet.create({
     cancelBtn: { backgroundColor: '#f1f5f9' },
     deliverBtn: { backgroundColor: '#16a34a', marginTop: 15 },
     trackBtn: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', marginTop: 15 },
+    invoiceBtn: { backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: '#a7f3d0', marginTop: 15, marginRight: 10, flex: 0.8 },
+    
+    // Modal & Invoice Styles
+    modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
+    invoiceModal: { backgroundColor: '#fff', borderRadius: 32, padding: 24, maxHeight: '90%' },
+    invoiceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    invoiceTitle: { fontSize: 16, fontWeight: '900', color: '#1e293b', letterSpacing: 1 },
+    brandHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 30, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+    logoCircle: { width: 60, height: 60, borderRadius: 30, justifyContent: 'center', alignItems: 'center' },
+    brandName: { fontSize: 24, fontWeight: '900', color: '#1e3a8a' },
+    brandTagline: { fontSize: 12, color: '#64748b', fontWeight: '600' },
+    invoiceMeta: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 },
+    metaLabel: { fontSize: 10, color: '#94a3b8', fontWeight: '800', marginBottom: 2 },
+    metaValue: { fontSize: 13, fontWeight: '800', color: '#1e293b', marginBottom: 8 },
+    metaSub: { fontSize: 12, color: '#64748b', fontWeight: '500', width: 150 },
+    invoiceTable: { marginBottom: 25 },
+    tableHeader: { flexDirection: 'row', borderBottomWidth: 2, borderBottomColor: '#f1f5f9', paddingBottom: 10, marginBottom: 10 },
+    tableHeaderText: { fontSize: 11, fontWeight: '800', color: '#94a3b8' },
+    tableRow: { flexDirection: 'row', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f8fafc' },
+    tableRowText: { fontSize: 14, color: '#1e293b', fontWeight: '600' },
+    invoiceSummary: { backgroundColor: '#f8fafc', padding: 20, borderRadius: 24, marginBottom: 20 },
+    summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+    summaryLabel: { fontSize: 14, color: '#64748b', fontWeight: '600' },
+    summaryValue: { fontSize: 14, color: '#1e293b', fontWeight: '800' },
+    divider: { height: 1, backgroundColor: '#e2e8f0', marginVertical: 10 },
+    paymentInfo: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+    payLabel: { fontSize: 12, color: '#64748b', fontWeight: '700', flex: 1 },
+    statusStamp: { borderWidth: 2, borderColor: '#10b981', paddingHorizontal: 15, paddingVertical: 5, borderRadius: 8, transform: [{ rotate: '-10deg' }] },
+    statusStampText: { fontSize: 18, fontWeight: '900' },
+    thankYouText: { textAlign: 'center', color: '#94a3b8', fontSize: 13, fontWeight: '600', marginBottom: 20 },
+    closeBtn: { backgroundColor: '#1e3a8a', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+    closeBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
     mapWrapper: {
         marginTop: 15,
         height: 250,

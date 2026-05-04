@@ -13,7 +13,7 @@ const payoutSchema = new mongoose.Schema({
     },
     role: {
         type: String,
-        enum: ['boat_owner', 'trip_planner', 'crew'],
+        enum: ['boat_owner', 'trip_planner', 'crew', 'main_buyer'],
         required: true
     },
     amount: {
@@ -28,7 +28,7 @@ const payoutSchema = new mongoose.Schema({
     paidAt: Date,
     type: {
         type: String,
-        enum: ['share', 'commission', 'rental'],
+        enum: ['share', 'commission', 'rental', 'retail_sale', 'logistics'],
         required: true
     }
 }, { timestamps: true });

@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    FlatList, 
-    TouchableOpacity, 
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
     ActivityIndicator,
     Alert,
     Dimensions,
@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import client from '../api/client';
 import MapComponent from '../components/MapComponent';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width } = Dimensions.get('window');
@@ -30,6 +31,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
     const [showMyLocation, setShowMyLocation] = useState(false);
     const [marketRates, setMarketRates] = useState([]);
     const [cart, setCart] = useState([]);
+    const [buyerPricesMap, setBuyerPricesMap] = useState({}); // { buyerId: [prices] }
+    const [recentOrders, setRecentOrders] = useState([]);
 
 
     const fishTypes = ['All', 'Tuna (කෙලවල්ලා)', 'Skipjack (බලයා)', 'Marlin (කොප්පරා)', 'Mullet (මෝරා)'];
@@ -39,6 +42,17 @@ const CustomerDashboardScreen = ({ navigation }) => {
         loadUserAndCatches();
     }, []);
 
+    useFocusEffect(
+        React.useCallback(() => {
+            if (user) {
+                fetchAvailableCatches(user.district);
+                fetchRecentOrders();
+                fetchCart();
+            }
+            return () => {};
+        }, [user])
+    );
+
     const loadUserAndCatches = async () => {
         try {
             const userData = await AsyncStorage.getItem('userData');
@@ -46,6 +60,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
                 const parsedUser = JSON.parse(userData);
                 setUser(parsedUser);
                 fetchAvailableCatches(parsedUser.district);
+                fetchRecentOrders();
+                fetchCart();
             } else {
                 fetchAvailableCatches('Galle');
             }
@@ -66,27 +82,50 @@ const CustomerDashboardScreen = ({ navigation }) => {
         }
     };
 
+    const fetchRecentOrders = async () => {
+        try {
+            const res = await client.get('/api/orders/my');
+            setRecentOrders(res.data.slice(0, 3)); // Only show top 3
+        } catch (e) {
+            console.warn('Could not fetch recent orders:', e.message);
+        }
+    };
+
+    const fetchCart = async () => {
+        try {
+            const response = await client.get('/api/users/cart');
+            if (response.data) {
+                setCart(response.data);
+            }
+        } catch (e) {
+            console.error("Error fetching cart:", e);
+        }
+    };
+
     const fetchAvailableCatches = async (userDistrict) => {
         try {
-            const response = await client.get('/api/trips/market/all'); 
+            const response = await client.get(`/api/inventory/market?district=${userDistrict}`);
             const data = Array.isArray(response.data) ? response.data : [];
-            
-            // Show trips that are sold to a buyer in this district
-            const soldTrips = data.filter(t => t.status === 'sold' && t.buyerId?.district === userDistrict);
 
-            const tripsWithSummary = await Promise.all(soldTrips.map(async (trip) => {
+            // Get unique seller IDs
+            const sellerIds = [...new Set(data.map(i => i.sellerId?._id).filter(Boolean))];
+
+            // Fetch prices for all these sellers
+            const pricesMap = {};
+            await Promise.all(sellerIds.map(async (sid) => {
                 try {
-                    const summaryRes = await client.get(`/api/trips/${trip._id}/summary`);
-                    return { ...trip, summary: summaryRes.data };
+                    const res = await client.get(`/api/buyer-prices/${sid}`);
+                    pricesMap[sid] = res.data;
                 } catch (e) {
-                    return { ...trip, summary: { customerStock: 0, catchBreakdown: {} } };
+                    pricesMap[sid] = [];
                 }
             }));
+            setBuyerPricesMap(pricesMap);
 
-            setAvailableCatches(tripsWithSummary);
-            setFilteredCatches(tripsWithSummary);
+            setAvailableCatches(data);
+            setFilteredCatches(data);
         } catch (error) {
-            console.error("Fetch catches error:", error);
+            console.error("Fetch inventory error:", error);
         } finally {
             setLoading(false);
         }
@@ -96,95 +135,180 @@ const CustomerDashboardScreen = ({ navigation }) => {
         if (selectedType === 'All') {
             setFilteredCatches(availableCatches);
         } else {
-            const filtered = availableCatches.filter(trip => 
+            const filtered = availableCatches.filter(trip =>
                 trip.summary && trip.summary.catchBreakdown && trip.summary.catchBreakdown[selectedType]
             );
             setFilteredCatches(filtered);
         }
     }, [selectedType, availableCatches]);
 
-    const addToCart = (trip, fishType) => {
-        const rate = marketRates.find(r => r.fishType === fishType) || marketRates[0];
-        const price = rate?.retailPriceB || 1300;
-        
+    const addToCart = async (item) => {
+        const fishType = item.fishType;
+        const sellerId = item.sellerId?._id;
+        const buyerPrices = buyerPricesMap[sellerId] || [];
+        const bPrice = buyerPrices.find(p => p.fishType === fishType);
+
+        // If buyer hasn't set price, fallback to global market rates
+        const globalRate = marketRates.find(r => r.fishType === fishType);
+        const price = bPrice ? bPrice.retailPriceB : (globalRate?.retailPriceB || 1300);
+
         const cartItem = {
-            id: `${trip._id}-${fishType}`,
-            tripId: trip._id,
-            buyerId: trip.buyerId?._id,
-            buyerName: trip.buyerId?.name,
+            id: `${item._id}`, // Use inventory ID
+            tripId: item.tripId?._id,
+            buyerId: sellerId,
+            buyerName: item.sellerId?.name,
             fishType,
             weight: 1, // Default 1kg
             price,
-            availableStock: trip.summary?.catchBreakdown?.[fishType] || 0,
-            image: trip.catches?.[0]?.photos?.[0] || trip.vesselId?.profileImage 
+            availableStock: item.weight,
+            grade: item.grade,
+            image: item.photos?.[0] || item.sellerId?.profileImage
         };
 
-        setCart(prev => {
-            const existing = prev.find(i => i.id === cartItem.id);
+        const updatedCart = (() => {
+            const existing = cart.find(i => i.id === cartItem.id);
             if (existing) {
-                return prev.map(i => i.id === cartItem.id ? { ...i, weight: i.weight + 1 } : i);
+                return cart.map(i => i.id === cartItem.id ? { ...i, weight: i.weight + 1 } : i);
             }
-            return [...prev, cartItem];
-        });
+            return [...cart, cartItem];
+        })();
+
+        setCart(updatedCart);
         
+        // Save to DB
+        try {
+            await client.post('/api/users/cart', { cart: updatedCart });
+        } catch (e) {
+            console.error("Error saving cart:", e);
+        }
+
         Alert.alert("Added to Cart", `${fishType} added to your selection.`);
     };
 
 
-    const renderCategorySection = (type) => {
-        const items = availableCatches.filter(trip => 
-            trip.summary && trip.summary.catchBreakdown && trip.summary.catchBreakdown[type]
-        );
-
-        if (items.length === 0) return null;
+    const renderHeroCarousel = () => {
+        const featured = availableCatches.slice(0, 5); // Show first 5 as featured
+        if (featured.length === 0) return null;
 
         return (
-            <View key={type} style={styles.sectionWrapper}>
-                <Text style={styles.sectionTitle}>{type}</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
-                    {items.map((item) => (
+            <View style={styles.carouselContainer}>
+                <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.carouselTitle}>Featured Fresh Catches</Text>
+                    <Text style={styles.liveBadge}>LIVE</Text>
+                </View>
+                <ScrollView 
+                    horizontal 
+                    showsHorizontalScrollIndicator={false} 
+                    snapToInterval={width * 0.75 + 20}
+                    decelerationRate="fast"
+                    contentContainerStyle={styles.carouselScroll}
+                >
+                    {featured.map((item, idx) => {
+                        const type = Object.keys(item.summary?.catchBreakdown || {})[0] || 'Fish';
+                        return (
+                            <TouchableOpacity key={idx} style={styles.heroCard}>
+                                <LinearGradient 
+                                    colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']} 
+                                    style={styles.heroGradient}
+                                />
+                                {item.catches?.[0]?.photos?.[0] ? (
+                                    <Image source={{ uri: item.catches[0].photos[0] }} style={styles.heroImage} />
+                                ) : (
+                                    <View style={[styles.heroImage, { backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' }]}>
+                                        <Ionicons name="boat" size={60} color="#334155" />
+                                    </View>
+                                )}
+                                <View style={styles.heroInfo}>
+                                    <View style={styles.heroTag}>
+                                        <Text style={styles.heroTagText}>PREMIUM CHOICE</Text>
+                                    </View>
+                                    <Text style={styles.heroTitle}>{type}</Text>
+                                    <View style={styles.heroRow}>
+                                        <Ionicons name="person-circle-outline" size={14} color="#cbd5e1" />
+                                        <Text style={styles.heroSubtitle}>{item.buyerId?.name}</Text>
+                                    </View>
+                                </View>
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+            </View>
+        );
+    };
+
+    const renderMarketGrid = () => {
+        // Flat inventory is already typed
+        const allProducts = selectedType === 'All' 
+            ? availableCatches 
+            : availableCatches.filter(i => i.fishType === selectedType);
+
+        if (allProducts.length === 0 && availableCatches.length > 0) return null;
+
+        return (
+            <View style={styles.marketSection}>
+                <View style={styles.sectionHeaderRow}>
+                    <Text style={styles.sectionTitle}>Market Explorer</Text>
+                </View>
+                
+                <View style={styles.gridContainer}>
+                    {allProducts.map((item, index) => (
                         <View key={item._id} style={styles.miniCatchCard}>
                             <View style={styles.miniImageContainer}>
-                                {item.catches?.[0]?.photos?.[0] ? (
-                                    <Image source={{ uri: item.catches[0].photos[0] }} style={styles.miniCatchImage} />
+                                {item.photos?.[0] ? (
+                                    <Image source={{ uri: item.photos[0] }} style={styles.miniCatchImage} />
                                 ) : (
                                     <View style={styles.noImagePlaceholder}>
-                                        <Ionicons name="image-outline" size={24} color="#94a3b8" />
+                                        <Ionicons name="fish-outline" size={30} color="#cbd5e1" />
                                     </View>
                                 )}
                                 <View style={styles.gradeBadge}>
-                                    <Text style={styles.gradeBadgeText}>FRESH</Text>
+                                    <Text style={styles.gradeBadgeText}>{item.fishType.split(' ')[0]}</Text>
                                 </View>
                             </View>
 
-                            <View style={styles.miniCardHeader}>
-                                <Text style={styles.miniVesselName} numberOfLines={1}>{item.buyerId?.name || "Premium Buyer"}</Text>
-                                <View style={styles.ratingBox}>
-                                    <Ionicons name="star" size={10} color="#f59e0b" />
-                                    <Text style={styles.ratingText}>4.8</Text>
+                            <View style={styles.cardInfoPadding}>
+                                <View style={styles.miniCardHeader}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.miniVesselName} numberOfLines={1}>{item.sellerId?.name || "Seller"}</Text>
+                                        <Text style={styles.miniLocation}>{item.sellerId?.district}</Text>
+                                    </View>
+                                    <View style={styles.ratingBox}>
+                                        <Ionicons name="star" size={8} color="#f59e0b" />
+                                        <Text style={styles.ratingText}>4.9</Text>
+                                    </View>
+                                </View>
+
+                                <View style={styles.stockBadge}>
+                                    <Text style={styles.miniStock}>{item.weight.toFixed(1)} kg Left</Text>
+                                </View>
+
+                                <View style={styles.miniPriceRow}>
+                                    <Text style={styles.miniPrice}>
+                                        LKR {(() => {
+                                            const bId = item.buyerId?._id;
+                                            const bPrices = buyerPricesMap[bId] || [];
+                                            const bPrice = bPrices.find(p => p.fishType === item.displayType);
+                                            const gRate = marketRates.find(r => r.fishType === item.displayType);
+                                            const p = bPrice ? bPrice.retailPriceB : (gRate?.retailPriceB || 1300);
+                                            return p.toLocaleString();
+                                        })()}
+                                    </Text>
+                                </View>
+
+                                <View style={styles.miniPriceRow}>
+                                    <Text style={styles.miniPrice}>LKR {((buyerPricesMap[item.sellerId?._id]?.find(p => p.fishType === item.fishType)?.retailPriceB) || (marketRates.find(r => r.fishType === item.fishType)?.retailPriceB) || 1300).toLocaleString()}</Text>
+                                    <TouchableOpacity 
+                                        onPress={() => addToCart(item)}
+                                        style={styles.miniAddBtn}
+                                    >
+                                        <Ionicons name="add" size={16} color="#fff" />
+                                        <Text style={styles.miniAddText}>Add</Text>
+                                    </TouchableOpacity>
                                 </View>
                             </View>
-                            
-                            <View style={styles.miniInfoRow}>
-                                <Ionicons name="scale-outline" size={12} color="#64748b" />
-                                <Text style={styles.miniStock}>{(item.summary.catchBreakdown[type]).toFixed(1)} kg available</Text>
-                            </View>
-
-                            <View style={styles.miniPriceRow}>
-                                <Text style={styles.miniPriceLabel}>Per KG</Text>
-                                <Text style={styles.miniPrice}>LKR {(marketRates.find(r => r.fishType === type)?.retailPriceB || 1300).toLocaleString()}</Text>
-                            </View>
-                            
-                            <TouchableOpacity 
-                                style={styles.miniAddBtn}
-                                onPress={() => addToCart(item, type)}
-                            >
-                                <Ionicons name="add" size={20} color="#fff" />
-                                <Text style={styles.miniAddText}>Add</Text>
-                            </TouchableOpacity>
                         </View>
                     ))}
-                </ScrollView>
+                </View>
             </View>
         );
     };
@@ -199,8 +323,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
                             <Text style={styles.subText}>Fresh catch in {user?.district || 'your area'}</Text>
                         </View>
                         <View style={styles.headerIcons}>
-                            <TouchableOpacity 
-                                onPress={() => navigation.navigate('Cart', { cart, user })} 
+                            <TouchableOpacity
+                                onPress={() => navigation.navigate('Cart', { cart, user })}
                                 style={styles.iconBtn}
                             >
                                 <Ionicons name="cart-outline" size={24} color="#fff" />
@@ -224,15 +348,15 @@ const CustomerDashboardScreen = ({ navigation }) => {
             <View style={styles.categorySection}>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroll}>
                     {fishTypes.map((type) => (
-                        <TouchableOpacity 
-                            key={type} 
+                        <TouchableOpacity
+                            key={type}
                             style={[styles.categoryChip, selectedType === type && styles.activeCategoryChip]}
                             onPress={() => setSelectedType(type)}
                         >
-                            <Ionicons 
-                                name={type === 'All' ? 'apps' : 'fish'} 
-                                size={18} 
-                                color={selectedType === type ? '#fff' : '#64748b'} 
+                            <Ionicons
+                                name={type === 'All' ? 'apps' : 'fish'}
+                                size={18}
+                                color={selectedType === type ? '#fff' : '#64748b'}
                             />
                             <Text style={[styles.categoryText, selectedType === type && styles.activeCategoryText]}>
                                 {type}
@@ -243,7 +367,7 @@ const CustomerDashboardScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.deliverySection}>
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={styles.deliveryCard}
                     onPress={() => setShowMyLocation(!showMyLocation)}
                 >
@@ -271,8 +395,43 @@ const CustomerDashboardScreen = ({ navigation }) => {
                 </View>
             ) : (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.mainScrollContent}>
-                    {fishTypes.filter(t => t !== 'All').map(type => renderCategorySection(type))}
-                    
+
+                    {/* ── My Recent Orders (New Section) ── */}
+                    {recentOrders.length > 0 && (
+                        <View style={styles.sectionWrapper}>
+                            <View style={styles.sectionHeaderRow}>
+                                <Text style={styles.sectionTitle}>Active Orders</Text>
+                                <TouchableOpacity onPress={() => navigation.navigate('OrderManagement')}>
+                                    <Text style={styles.viewAllText}>View All</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                                {recentOrders.map((order) => (
+                                    <TouchableOpacity
+                                        key={order._id}
+                                        style={styles.orderMiniCard}
+                                        onPress={() => navigation.navigate('OrderManagement')}
+                                    >
+                                        <View style={styles.orderCardHeader}>
+                                            <View style={[styles.statusDotSmall, { backgroundColor: getStatusColor(order.status) }]} />
+                                            <Text style={styles.orderStatusText}>{order.status.toUpperCase()}</Text>
+                                        </View>
+                                        <Text style={styles.orderItemNames} numberOfLines={1}>
+                                            {order.items.map(it => it.fishType).join(', ')}
+                                        </Text>
+                                        <View style={styles.orderCardFooter}>
+                                            <Text style={styles.orderTotalLabel}>Total:</Text>
+                                            <Text style={styles.orderTotalValue}>LKR {order.totalPrice?.toLocaleString()}</Text>
+                                        </View>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    )}
+
+                    {renderHeroCarousel()}
+                    {renderMarketGrid()}
+
                     {availableCatches.length === 0 && (
                         <View style={styles.emptyContainer}>
                             <Ionicons name="search-outline" size={80} color="#cbd5e1" />
@@ -399,106 +558,129 @@ const styles = StyleSheet.create({
     miniCatchCard: {
         backgroundColor: '#fff',
         borderRadius: 24,
-        padding: 12,
-        marginRight: 16,
-        width: 190,
-        elevation: 5,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
+        width: (width - 64) / 2, // Two columns with padding
+        marginBottom: 16,
+        elevation: 6,
+        shadowColor: '#0f172a',
+        shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.1,
-        shadowRadius: 12,
+        shadowRadius: 10,
+        overflow: 'hidden',
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
+    },
+    gridContainer: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        justifyContent: 'space-between',
+        paddingHorizontal: 24,
     },
     miniImageContainer: {
         width: '100%',
-        height: 120,
-        borderRadius: 18,
-        overflow: 'hidden',
-        marginBottom: 12,
-        backgroundColor: '#f1f5f9',
+        height: 110,
+        backgroundColor: '#f8fafc',
     },
     miniCatchImage: {
         width: '100%',
         height: '100%',
         resizeMode: 'cover',
     },
-    noImagePlaceholder: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
+    cardInfoPadding: {
+        padding: 16,
     },
     gradeBadge: {
         position: 'absolute',
-        top: 8,
-        left: 8,
-        backgroundColor: 'rgba(34, 197, 94, 0.9)',
-        paddingHorizontal: 8,
-        paddingVertical: 4,
-        borderRadius: 8,
+        top: 12,
+        left: 12,
+        backgroundColor: '#22c55e',
+        paddingHorizontal: 10,
+        paddingVertical: 5,
+        borderRadius: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 4,
     },
     gradeBadgeText: {
         color: '#fff',
-        fontSize: 10,
-        fontWeight: '800',
+        fontSize: 9,
+        fontWeight: '900',
+        letterSpacing: 0.5,
     },
     miniCardHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 4,
+        alignItems: 'flex-start',
+        marginBottom: 12,
     },
     miniVesselName: {
-        fontSize: 13,
+        fontSize: 15,
         fontWeight: '800',
         color: '#1e293b',
-        flex: 1,
+    },
+    miniLocationRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 2,
+    },
+    miniLocation: {
+        fontSize: 11,
+        color: '#64748b',
+        fontWeight: '700',
     },
     ratingBox: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: '#fffbeb',
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
-        gap: 3,
+        backgroundColor: '#fff7ed',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 10,
+        gap: 4,
     },
     ratingText: {
-        fontSize: 10,
+        fontSize: 11,
         fontWeight: '800',
-        color: '#b45309',
+        color: '#9a3412',
     },
     miniInfoRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        marginBottom: 8,
+        marginBottom: 12,
+    },
+    stockBadge: {
+        backgroundColor: '#eff6ff',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+        alignSelf: 'flex-start',
     },
     miniStock: {
         fontSize: 11,
-        color: '#64748b',
-        fontWeight: '600',
+        color: '#2563eb',
+        fontWeight: '800',
     },
     miniPriceRow: {
-        marginTop: 2,
+        marginBottom: 16,
     },
     miniPriceLabel: {
-        fontSize: 9,
-        color: '#64748b',
+        fontSize: 10,
+        color: '#94a3b8',
         fontWeight: '700',
         textTransform: 'uppercase',
+        letterSpacing: 0.5,
+        marginBottom: 2,
     },
     miniPrice: {
-        fontSize: 18,
+        fontSize: 16,
         fontWeight: '900',
-        color: '#2563eb',
+        color: '#0f172a',
     },
     miniAddBtn: {
-        backgroundColor: '#0f172a',
+        backgroundColor: '#2563eb',
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         paddingVertical: 10,
         borderRadius: 14,
-        marginTop: 12,
         gap: 6,
     },
     miniAddText: {
@@ -522,7 +704,160 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontSize: 10,
         fontWeight: '900',
-    }
+    },
+    carouselContainer: {
+        marginTop: 20,
+    },
+    carouselTitle: {
+        fontSize: 20,
+        fontWeight: '900',
+        color: '#0f172a',
+        paddingHorizontal: 24,
+        marginBottom: 15,
+    },
+    liveBadge: {
+        backgroundColor: '#ef4444',
+        color: '#fff',
+        fontSize: 10,
+        fontWeight: '900',
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 6,
+        marginRight: 24,
+    },
+    carouselScroll: {
+        paddingLeft: 24,
+        paddingBottom: 20,
+    },
+    heroCard: {
+        width: width * 0.75,
+        height: 200,
+        borderRadius: 32,
+        marginRight: 20,
+        backgroundColor: '#000',
+        overflow: 'hidden',
+        elevation: 12,
+        shadowColor: '#2563eb',
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.3,
+        shadowRadius: 15,
+    },
+    heroImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    heroGradient: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: '70%',
+        zIndex: 1,
+    },
+    heroInfo: {
+        position: 'absolute',
+        bottom: 20,
+        left: 20,
+        right: 20,
+        zIndex: 2,
+    },
+    heroTag: {
+        backgroundColor: '#2563eb',
+        alignSelf: 'flex-start',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 6,
+        marginBottom: 8,
+    },
+    heroTagText: {
+        color: '#fff',
+        fontSize: 8,
+        fontWeight: '900',
+        letterSpacing: 0.5,
+    },
+    heroTitle: {
+        color: '#fff',
+        fontSize: 24,
+        fontWeight: '900',
+        marginBottom: 4,
+    },
+    heroRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+    },
+    heroSubtitle: {
+        color: '#cbd5e1',
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    marketSection: {
+        marginTop: 10,
+    },
+    viewAllText: {
+        fontSize: 12,
+        color: '#2563eb',
+        fontWeight: '700',
+        marginRight: 24,
+    },
+    orderMiniCard: {
+        backgroundColor: '#1e293b',
+        borderRadius: 20,
+        padding: 16,
+        marginRight: 15,
+        width: 180,
+    },
+    orderCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 8,
+    },
+    statusDotSmall: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+    },
+    orderStatusText: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#94a3b8',
+    },
+    orderItemNames: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#fff',
+        marginBottom: 10,
+    },
+    orderCardFooter: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(255,255,255,0.1)',
+        paddingTop: 8,
+    },
+    orderTotalLabel: {
+        fontSize: 10,
+        color: '#94a3b8',
+        fontWeight: '600',
+    },
+    orderTotalValue: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#22c55e',
+    },
 });
+
+const getStatusColor = (status) => {
+    switch (status) {
+        case 'pending': return '#f59e0b';
+        case 'confirmed': return '#3b82f6';
+        case 'delivered': return '#10b981';
+        case 'cancelled': return '#ef4444';
+        default: return '#64748b';
+    }
+};
 
 export default CustomerDashboardScreen;

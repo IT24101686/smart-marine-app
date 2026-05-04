@@ -1,59 +1,75 @@
+import mongoose from 'mongoose';
 import Order from '../models/Order.js';
 import Trip from '../models/Trip.js';
+import Catch from '../models/Catch.js';
 import Payout from '../models/Payout.js';
+import Inventory from '../models/Inventory.js';
 import { createNotification } from './notificationController.js';
 
 
-// @desc    Create a new retail order
+// @desc    Create a new retail order (Deducts from District Buyer's Inventory)
 export const createOrder = async (req, res) => {
     const { buyerId, tripId, items, totalPrice, deliveryAddress } = req.body;
+    console.log("📦 Creating Order from Inventory:", { buyerId, tripId, itemsCount: items?.length, totalPrice });
+
     try {
-        // 1. Check stock and Deduct weight from Trip catch
-        const trip = await Trip.findById(tripId);
-        if (!trip) return res.status(404).json({ message: "Trip not found" });
+        // Iterate items to subtract weights from District Buyer's inventory
+        for (const item of items) {
+            console.log(`🐟 Processing inventory deduction for ${item.fishType} (${item.grade}): ${item.weight}kg`);
 
-        // Iterate items to subtract weights
-        items.forEach(item => {
-            const catchItem = trip.catches.find(c => c.fishType === item.fishType);
-            // In a real scenario, we'd check grade too, but for now we subtract from fishType weight
-            // This is simplified as the trip summary already groups them
-        });
+            // Find matching inventory items for this buyer, fishType and grade
+            // We use FIFO (First-In-First-Out) if multiple batches exist
+            const inventoryBatches = await Inventory.find({
+                sellerId: buyerId,
+                fishType: item.fishType,
+                grade: item.grade,
+                weight: { $gt: 0 }
+            }).sort({ createdAt: 1 });
 
-        // 2. Create the Order
+            if (inventoryBatches.length === 0) {
+                return res.status(400).json({ message: `Insufficient stock for ${item.fishType} (${item.grade})` });
+            }
+
+            let weightToDeduct = item.weight;
+            for (const batch of inventoryBatches) {
+                if (weightToDeduct <= 0) break;
+
+                const deductAmount = Math.min(batch.weight, weightToDeduct);
+                batch.weight -= deductAmount;
+                weightToDeduct -= deductAmount;
+                await batch.save();
+            }
+
+            if (weightToDeduct > 0) {
+                return res.status(400).json({ message: `Not enough stock for ${item.fishType}. Missing: ${weightToDeduct}kg` });
+            }
+        }
+
+        // Create the Order
         const newOrder = new Order({
             customerId: req.user._id,
             buyerId,
-            tripId,
+            tripId, // Link to the specific trip this catch came from
             items,
             totalPrice,
             deliveryAddress,
-            status: 'pending'
+            status: 'pending' // Orders start as pending for buyer approval
         });
         const savedOrder = await newOrder.save();
-        
-        // 3. Record Payout for the District Seller (Main Buyer)
-        // Since the Buyer bought the catch wholesale, the retail price is their revenue.
-        const sellerPayout = new Payout({
-            tripId,
-            userId: buyerId,
-            role: 'main_buyer', // District Seller role in payout
-            amount: totalPrice,
-            type: 'retail_sale'
-        });
-        await sellerPayout.save();
 
-        // 4. Notify Buyer
+        // Notify Buyer
         createNotification(
             buyerId,
             "New Retail Order! 🛍️",
-            `A customer (${req.user.name}) ordered ${items.length} items for LKR ${totalPrice.toLocaleString()}. Check order management for delivery.`,
+            `A customer (${req.user.name}) ordered ${items.length} items for LKR ${totalPrice.toLocaleString()}. Please approve or reject.`,
             'order',
             savedOrder._id,
             req.user._id
         );
 
-        res.status(201).json({ message: "Order placed successfully!", order: savedOrder });
+        res.status(201).json({ message: "Order placed successfully! Waiting for buyer approval.", order: savedOrder });
     } catch (error) {
+        console.error("Order Creation Error:", error);
         res.status(500).json({ message: error.message });
     }
 };
@@ -62,7 +78,7 @@ export const createOrder = async (req, res) => {
 export const getMyOrders = async (req, res) => {
     try {
         const orders = await Order.find({ customerId: req.user._id })
-            .populate('buyerId', 'name phone district address')
+            .populate('buyerId', 'name phone district address latitude longitude shopName')
             .sort({ createdAt: -1 });
         res.status(200).json(orders);
     } catch (error) {
@@ -74,7 +90,7 @@ export const getMyOrders = async (req, res) => {
 export const getReceivedOrders = async (req, res) => {
     try {
         const orders = await Order.find({ buyerId: req.user._id })
-            .populate('customerId', 'name phone address')
+            .populate('customerId', 'name phone address latitude longitude')
             .sort({ createdAt: -1 });
         res.status(200).json(orders);
     } catch (error) {
@@ -94,14 +110,35 @@ export const updateOrderStatus = async (req, res) => {
             return res.status(403).json({ message: "Not authorized to update this order" });
         }
 
+        // Handle Rejection: Restore inventory weight
+        if (status === 'cancelled' || status === 'rejected') {
+            console.log(`🔄 Restoring inventory for rejected order ${order._id}`);
+            for (const item of order.items) {
+                // Find the first available inventory record for this fish/grade to add back the weight
+                // (Or ideally, we'd track exactly which batch it came from, but for now we restore to the newest batch)
+                let inventoryItem = await Inventory.findOne({
+                    sellerId: order.buyerId,
+                    fishType: item.fishType,
+                    grade: item.grade
+                }).sort({ createdAt: -1 });
+
+                if (inventoryItem) {
+                    inventoryItem.weight += item.weight;
+                    await inventoryItem.save();
+                }
+            }
+        }
+
         order.status = status;
         await order.save();
 
         // Notify Customer
         createNotification(
             order.customerId,
-            "Order Update! 📦",
-            `Your order status has been updated to: ${status.toUpperCase()}.`,
+            status === 'confirmed' ? "Order Accepted! ✅" : "Order Update! 📦",
+            status === 'confirmed'
+                ? `Your order from ${req.user.name} has been accepted and is being prepared.`
+                : `Your order status has been updated to: ${status.toUpperCase()}.`,
             'order',
             order._id,
             req.user._id
@@ -110,9 +147,53 @@ export const updateOrderStatus = async (req, res) => {
         res.status(200).json({ message: `Order status updated to ${status}`, order });
 
     } catch (error) {
+        console.error("Update Order Status Error:", error);
         res.status(500).json({ message: error.message });
     }
 };
+
+// @desc    Pay for an order (Customer)
+export const payOrder = async (req, res) => {
+    try {
+        const order = await Order.findById(req.params.id);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        if (order.status !== 'confirmed') {
+            return res.status(400).json({ message: "Order must be approved by buyer before payment" });
+        }
+
+        order.status = 'paid';
+        await order.save();
+
+        // Now record the payout for the District Buyer after payment is successful
+        const sellerPayout = new Payout({
+            tripId: order.tripId,
+            userId: order.buyerId,
+            role: 'main_buyer',
+            amount: order.totalPrice,
+            type: 'retail_sale',
+            status: 'paid',
+            paidAt: new Date()
+        });
+        await sellerPayout.save();
+
+        // Notify Buyer
+        createNotification(
+            order.buyerId,
+            "Payment Received! 💰",
+            `Customer ${req.user.name} has paid LKR ${order.totalPrice.toLocaleString()} for order #${order._id.toString().slice(-6)}.`,
+            'order',
+            order._id,
+            req.user._id
+        );
+
+        res.status(200).json({ message: "Payment successful!", order });
+    } catch (error) {
+        console.error("Pay Order Error:", error);
+        res.status(500).json({ message: error.message });
+    }
+};
+
 
 // @desc    Cancel order (by customer)
 export const cancelOrder = async (req, res) => {
@@ -124,8 +205,24 @@ export const cancelOrder = async (req, res) => {
             return res.status(403).json({ message: "Not authorized" });
         }
 
-        if (order.status !== 'pending') {
-            return res.status(400).json({ message: "Only pending orders can be cancelled" });
+        // Allow cancellation if pending or processing
+        if (order.status !== 'pending' && order.status !== 'processing') {
+            return res.status(400).json({ message: "Cannot cancel order at this stage" });
+        }
+
+        // Restore inventory weight on customer cancellation
+        console.log(`🔄 Restoring inventory for customer cancelled order ${order._id}`);
+        for (const item of order.items) {
+            let inventoryItem = await Inventory.findOne({
+                sellerId: order.buyerId,
+                fishType: item.fishType,
+                grade: item.grade
+            }).sort({ createdAt: -1 });
+
+            if (inventoryItem) {
+                inventoryItem.weight += item.weight;
+                await inventoryItem.save();
+            }
         }
 
         order.status = 'cancelled';

@@ -16,6 +16,7 @@ const orderSchema = new mongoose.Schema({
         ref: 'Trip'
     },
     items: [{
+        inventoryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Inventory' },
         fishType: String,
         weight: Number,
         price: Number,
@@ -27,7 +28,7 @@ const orderSchema = new mongoose.Schema({
     },
     status: {
         type: String,
-        enum: ['pending', 'confirmed', 'delivered', 'cancelled'],
+        enum: ['pending', 'confirmed', 'paid', 'delivered', 'cancelled'],
         default: 'pending'
     },
     deliveryAddress: {

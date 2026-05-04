@@ -18,7 +18,8 @@ import {
     updateTripPrices,
     markAttendance,
     getUserPayouts,
-    getDistrictOngoingCatches
+    getDistrictOngoingCatches,
+    rateCrew
 } from '../controllers/tripController.js';
 
 import { 
@@ -63,5 +64,6 @@ router.put('/:id/complete', protect, completeTrip);
 router.put('/:id/prices', protect, updateTripPrices);
 router.put('/:id/attendance', protect, markAttendance);
 router.put('/:id/reschedule', protect, rescheduleTrip);
+router.post('/:id/rate-crew', protect, rateCrew);
 
 export default router;

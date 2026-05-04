@@ -30,12 +30,10 @@ const FishermanDashboardScreen = ({ navigation }) => {
 
     const loadUserAndTrips = async () => {
         try {
-            const userData = await AsyncStorage.getItem('userData');
-            if (userData) {
-                const parsedUser = JSON.parse(userData);
-                setUser(parsedUser);
-                fetchData(parsedUser.district);
-            }
+            // Fetch fresh profile for rating
+            const profileRes = await client.get('/api/users/profile');
+            setUser(profileRes.data);
+            fetchData(profileRes.data.district);
         } catch (error) {
             console.error(error);
             setLoading(false);
@@ -149,13 +147,19 @@ const FishermanDashboardScreen = ({ navigation }) => {
             <LinearGradient colors={['#0f172a', '#1e3a8a']} style={styles.header}>
                 <SafeAreaView>
                     <View style={styles.headerContent}>
-                        <View>
-                            <Text style={styles.welcomeText}>Available Trips</Text>
-                            <Text style={styles.subText}>Find a trip to join (Nearest First)</Text>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.welcomeText}>Hello, {user?.name?.split(' ')[0]}</Text>
+                            <View style={styles.ratingRow}>
+                                <Ionicons name="star" size={14} color="#fbbf24" />
+                                <Text style={styles.ratingText}>
+                                    {user?.rating ? user.rating.toFixed(1) : 'N/A'} ({user?.totalRatings || 0} reviews)
+                                </Text>
+                            </View>
+                            <Text style={styles.subText}>Find a trip to join in {user?.district}</Text>
                         </View>
 
                         <TouchableOpacity style={styles.profileBtn} onPress={() => navigation.navigate('Profile')}>
-                            <Ionicons name="person-circle-outline" size={32} color="#fff" />
+                            <Ionicons name="person-circle-outline" size={40} color="#fff" />
                         </TouchableOpacity>
                     </View>
                 </SafeAreaView>
@@ -241,6 +245,17 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: 'rgba(255, 255, 255, 0.7)',
         marginTop: 4,
+    },
+    ratingRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginTop: 4,
+    },
+    ratingText: {
+        color: '#fbbf24',
+        fontSize: 14,
+        fontWeight: '700',
     },
     profileBtn: {
         justifyContent: 'center',

@@ -5,7 +5,8 @@ import {
     updateVesselStatus,
     getAvailableForRentVessels,
     rentVessel,
-    deleteVessel
+    deleteVessel,
+    recordMaintenance
 } from '../controllers/vesselController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -23,5 +24,7 @@ router.get('/my-vessels', protect, getMyVessels);
 router.route('/:id')
     .put(protect, updateVesselStatus)
     .delete(protect, deleteVessel);
+
+router.post('/:id/maintenance', protect, recordMaintenance);
 
 export default router;

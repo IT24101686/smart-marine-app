@@ -3,28 +3,37 @@ import { StyleSheet, View, ActivityIndicator, Alert, Linking, TouchableOpacity, 
 import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 
-const MapComponent = ({ address1, address2 }) => {
+const MapComponent = ({ address1, address2, coord1, coord2 }) => {
     const [loading, setLoading] = useState(true);
     const [coords, setCoords] = useState([]);
 
     useEffect(() => {
-        if (address1 || address2) {
+        if (address1 || address2 || coord1 || coord2) {
             geocodeAll();
         }
-    }, [address1, address2]);
+    }, [address1, address2, coord1, coord2]);
 
     const geocodeAll = async () => {
         setLoading(true);
         try {
             const newCoords = [];
-            if (address1) {
+            
+            // Handle first location
+            if (coord1 && coord1.lat && coord1.lon) {
+                newCoords.push({ ...coord1, title: 'Seller Location', color: 'red' });
+            } else if (address1) {
                 const pos = await getCoords(address1);
                 if (pos) newCoords.push({ ...pos, title: 'Location 1', color: 'red' });
             }
-            if (address2) {
+
+            // Handle second location
+            if (coord2 && coord2.lat && coord2.lon) {
+                newCoords.push({ ...coord2, title: 'Delivery Location', color: 'blue' });
+            } else if (address2) {
                 const pos = await getCoords(address2);
                 if (pos) newCoords.push({ ...pos, title: 'Location 2', color: 'blue' });
             }
+            
             setCoords(newCoords);
         } catch (error) {
             console.error("Geocoding error:", error);
@@ -36,7 +45,7 @@ const MapComponent = ({ address1, address2 }) => {
     const getCoords = async (address) => {
         try {
             const parts = address.split(',').map(p => p.trim());
-            
+
             // Try different combinations of the address for better accuracy
             const queries = [
                 address, // Full address
@@ -53,7 +62,7 @@ const MapComponent = ({ address1, address2 }) => {
                     headers: { 'User-Agent': 'SmartMarineApp/1.0' }
                 });
                 const data = await response.json();
-                
+
                 if (data && data.length > 0) {
                     return {
                         lat: parseFloat(data[0].lat),
@@ -139,13 +148,12 @@ const MapComponent = ({ address1, address2 }) => {
                         markers.push([c.lat, c.lon]);
                     });
 
-                    // Draw line if multiple points
+                    // Draw solid thick red line if multiple points
                     if (markers.length > 1) {
                         var polyline = L.polyline(markers, {
                             color: '#ff0000',
-                            weight: 4,
-                            opacity: 0.7,
-                            dashArray: '10, 10',
+                            weight: 6,
+                            opacity: 0.85,
                             lineJoin: 'round'
                         }).addTo(map);
                     }
@@ -182,7 +190,7 @@ const MapComponent = ({ address1, address2 }) => {
             />
 
 
-            
+
             {coords.length > 0 && !loading && (
                 <TouchableOpacity style={styles.openMapsBtn} onPress={handleOpenExternalMaps}>
                     <Ionicons name="location-sharp" size={18} color="#fff" />

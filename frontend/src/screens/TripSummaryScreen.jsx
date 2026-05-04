@@ -47,6 +47,7 @@ const TripSummaryScreen = ({ route, navigation }) => {
     };
 
     // ── Sell Grade C ──────────────────────────────────────────
+    // ── Sell Grade C ──────────────────────────────────────────
     const handleSellGradeC = () => {
         Alert.prompt(
             'Sell Grade C Stock',
@@ -70,6 +71,44 @@ const TripSummaryScreen = ({ route, navigation }) => {
             ],
             'plain-text',
             '5000'
+        );
+    };
+
+    // ── Rate Crew ─────────────────────────────────────────────
+    const handleRateCrew = (crewMember) => {
+        Alert.alert(
+            `Rate ${crewMember.name}`,
+            'How was their performance on this trip?',
+            [
+                { text: '1 ⭐', onPress: () => submitRating(crewMember, 1) },
+                { text: '2 ⭐', onPress: () => submitRating(crewMember, 2) },
+                { text: '3 ⭐', onPress: () => submitRating(crewMember, 3) },
+                { text: '4 ⭐', onPress: () => submitRating(crewMember, 4) },
+                { text: '5 ⭐', onPress: () => submitRating(crewMember, 5) },
+                { text: 'Cancel', style: 'cancel' }
+            ]
+        );
+    };
+
+    const submitRating = async (crewMember, stars) => {
+        Alert.prompt(
+            'Add a comment (Optional)',
+            `Provide a brief feedback for ${crewMember.name}`,
+            async (comment) => {
+                try {
+                    await client.post(`/api/trips/${tripId}/rate-crew`, {
+                        ratings: [{
+                            userId: crewMember._id,
+                            rating: stars,
+                            comment: comment || 'Good work'
+                        }]
+                    });
+                    Alert.alert('Success', 'Rating submitted!');
+                    loadAll();
+                } catch (e) {
+                    Alert.alert('Error', 'Failed to submit rating');
+                }
+            }
         );
     };
 
@@ -305,17 +344,36 @@ const TripSummaryScreen = ({ route, navigation }) => {
                 {/* ══════════ CREW LIST ══════════ */}
                 {summary?.crew && summary.crew.length > 0 && (
                     <View style={styles.card}>
-                        <SectionHeader icon="people-outline" title="Crew Members" />
-                        {summary.crew.map((m, i) => (
-                            <View key={m._id || i} style={styles.crewRow}>
-                                <Ionicons name="person-circle-outline" size={28} color="#2563eb" />
-                                <View style={{ flex: 1, marginLeft: 10 }}>
-                                    <Text style={styles.crewName}>{m.name}</Text>
-                                    <Text style={styles.crewSub}>{m.district || 'N/A'}</Text>
+                        <SectionHeader icon="people-outline" title="Crew Members Performance" />
+                        {summary.crew.map((m, i) => {
+                            const existingRating = summary.crewRatings?.find(r => r.userId === m._id);
+                            return (
+                                <View key={m._id || i} style={styles.crewRow}>
+                                    <Ionicons name="person-circle-outline" size={28} color="#2563eb" />
+                                    <View style={{ flex: 1, marginLeft: 10 }}>
+                                        <Text style={styles.crewName}>{m.name}</Text>
+                                        <Text style={styles.crewSub}>{m.district || 'N/A'}</Text>
+                                        {existingRating && (
+                                            <View style={styles.ratingBadge}>
+                                                <Ionicons name="star" size={12} color="#fbbf24" />
+                                                <Text style={styles.ratingBadgeText}>{existingRating.rating} Stars</Text>
+                                            </View>
+                                        )}
+                                    </View>
+                                    {!existingRating ? (
+                                        <TouchableOpacity 
+                                            style={styles.rateBtn} 
+                                            onPress={() => handleRateCrew(m)}
+                                        >
+                                            <Ionicons name="star-outline" size={16} color="#fff" />
+                                            <Text style={styles.rateBtnText}>Rate</Text>
+                                        </TouchableOpacity>
+                                    ) : (
+                                        <Text style={styles.crewShare}>LKR {fmt(crewPer)}</Text>
+                                    )}
                                 </View>
-                                <Text style={styles.crewShare}>LKR {fmt(crewPer)}</Text>
-                            </View>
-                        ))}
+                            );
+                        })}
                     </View>
                 )}
 
@@ -449,11 +507,32 @@ const styles = StyleSheet.create({
     crewName:        { fontSize: 14, fontWeight: '800', color: '#1e293b' },
     crewSub:         { fontSize: 12, color: '#64748b', fontWeight: '500' },
     crewShare:       { fontSize: 14, fontWeight: '800', color: '#2563eb' },
+    rateBtn: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        backgroundColor: '#fbbf24', 
+        paddingHorizontal: 12, 
+        paddingVertical: 6, 
+        borderRadius: 10, 
+        gap: 4 
+    },
+    rateBtnText: { color: '#fff', fontSize: 12, fontWeight: '800' },
+    ratingBadge: { 
+        flexDirection: 'row', 
+        alignItems: 'center', 
+        gap: 4, 
+        backgroundColor: '#fef3c7', 
+        alignSelf: 'flex-start', 
+        paddingHorizontal: 6, 
+        paddingVertical: 2, 
+        borderRadius: 6, 
+        marginTop: 4 
+    },
+    ratingBadgeText: { color: '#92400e', fontSize: 10, fontWeight: '800' },
 
     // Bottom button
     homeBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#2563eb', paddingVertical: 16, borderRadius: 20, marginTop: 6 },
     homeBtnText:     { color: '#fff', fontSize: 17, fontWeight: '800' },
-
     loader:          { flex: 1, justifyContent: 'center', alignItems: 'center' },
     loadingText:     { marginTop: 12, color: '#64748b', fontWeight: '600' },
 });

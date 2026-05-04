@@ -9,21 +9,22 @@ import {
     Dimensions,
     TextInput,
     ActivityIndicator,
-    Alert
+    Alert,
+    FlatList
 } from 'react-native';
-
-
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import client from '../api/client';
 
 const { width } = Dimensions.get('window');
 
 const HomeScreen = ({ navigation }) => {
     const [user, setUser] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
+    const [finishedTrips, setFinishedTrips] = React.useState([]);
+    const [tripsLoading, setTripsLoading] = React.useState(false);
 
     React.useEffect(() => {
         loadUserData();
@@ -36,14 +37,32 @@ const HomeScreen = ({ navigation }) => {
                 try {
                     const parsed = JSON.parse(userData);
                     setUser(parsed);
+                    if (parsed.role === 'trip_planner') {
+                        fetchFinishedTrips();
+                    }
                 } catch (e) {
-                    console.error("JSON Parse error:", e);
+                    console.error('JSON Parse error:', e);
                 }
             }
         } catch (error) {
-            console.error("AsyncStorage error:", error);
+            console.error('AsyncStorage error:', error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchFinishedTrips = async () => {
+        setTripsLoading(true);
+        try {
+            const res = await client.get('/api/trips/my-trips');
+            const all = Array.isArray(res.data) ? res.data : [];
+            // Show completed + sold trips only
+            const finished = all.filter(t => ['completed', 'sold'].includes(t.status));
+            setFinishedTrips(finished);
+        } catch (e) {
+            console.warn('Could not load trips:', e.message);
+        } finally {
+            setTripsLoading(false);
         }
     };
 
@@ -220,36 +239,110 @@ const HomeScreen = ({ navigation }) => {
                         </LinearGradient>
                     </View>
 
-                    {/* Recent Activity */}
-                    <View style={styles.recentHeader}>
-                        <Text style={styles.sectionTitle}>Recent Trips</Text>
-                        <TouchableOpacity>
-                            <Text style={styles.seeAll}>See All</Text>
-                        </TouchableOpacity>
-                    </View>
+                    {/* Finished Trips Section — trip_planner only */}
+                    {user?.role === 'trip_planner' && (
+                        <View>
+                            <View style={styles.recentHeader}>
+                                <Text style={styles.sectionTitle}>Previous Trips</Text>
+                                <TouchableOpacity onPress={fetchFinishedTrips}>
+                                    <Ionicons name="refresh" size={20} color="#2563eb" />
+                                </TouchableOpacity>
+                            </View>
 
-                    <View style={styles.activityCard}>
-                        <View style={styles.activityIcon}>
-                            <Ionicons name="boat-outline" size={20} color="#2563eb" />
-                        </View>
-                        <View style={styles.activityText}>
-                            <Text style={styles.activityTitle}>Ocean Queen Arrived</Text>
-                            <Text style={styles.activityTime}>2 hours ago • Galle Harbor</Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-                    </View>
+                            {tripsLoading ? (
+                                <ActivityIndicator size="small" color="#2563eb" style={{ marginTop: 10 }} />
+                            ) : finishedTrips.length === 0 ? (
+                                <View style={styles.emptyTrips}>
+                                    <Ionicons name="boat-outline" size={48} color="#cbd5e1" />
+                                    <Text style={styles.emptyTripsText}>No completed trips yet.</Text>
+                                </View>
+                            ) : (
+                                finishedTrips.map((trip) => {
+                                    const isSold   = trip.status === 'sold';
+                                    const date     = new Date(trip.departureTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                                    const crewCount = (trip.crew || []).length;
+                                    const revenue  = trip.totalRevenue || trip.estimatedRevenue || 0;
+                                    return (
+                                        <TouchableOpacity
+                                            key={trip._id}
+                                            style={styles.tripCard}
+                                            onPress={() => navigation.navigate('TripSummary', { tripId: trip._id })}
+                                            activeOpacity={0.85}
+                                        >
+                                            {/* Status badge */}
+                                            <View style={[styles.tripStatusBadge, { backgroundColor: isSold ? '#dcfce7' : '#fef9c3' }]}>
+                                                <Text style={[styles.tripStatusText, { color: isSold ? '#166534' : '#854d0e' }]}>
+                                                    {isSold ? '✅ SOLD' : '🔵 COMPLETED'}
+                                                </Text>
+                                            </View>
 
-                    <View style={styles.activityCard}>
-                        <View style={styles.activityIcon}>
-                            <Ionicons name="people" size={20} color="#16a34a" />
+                                            {/* Vessel + date */}
+                                            <View style={styles.tripCardHeader}>
+                                                <View style={styles.tripIconBox}>
+                                                    <Ionicons name="boat" size={22} color="#2563eb" />
+                                                </View>
+                                                <View style={{ flex: 1 }}>
+                                                    <Text style={styles.tripVesselName}>{trip.vesselId?.name || 'Unknown Vessel'}</Text>
+                                                    <Text style={styles.tripDate}>📅 {date}</Text>
+                                                </View>
+                                                <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                                            </View>
+
+                                            {/* Stats row */}
+                                            <View style={styles.tripStatsRow}>
+                                                <View style={styles.tripStat}>
+                                                    <Text style={styles.tripStatLabel}>Crew</Text>
+                                                    <Text style={styles.tripStatValue}>👥 {crewCount}</Text>
+                                                </View>
+                                                <View style={styles.tripStatDivider} />
+                                                <View style={styles.tripStat}>
+                                                    <Text style={styles.tripStatLabel}>Type</Text>
+                                                    <Text style={styles.tripStatValue}>🎣 {trip.tripType || 'Standard'}</Text>
+                                                </View>
+                                                <View style={styles.tripStatDivider} />
+                                                <View style={styles.tripStat}>
+                                                    <Text style={styles.tripStatLabel}>{isSold ? 'Revenue' : 'Est. Value'}</Text>
+                                                    <Text style={[styles.tripStatValue, { color: '#16a34a' }]}>
+                                                        {revenue > 0 ? `LKR ${Math.round(revenue).toLocaleString()}` : 'See summary'}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        </TouchableOpacity>
+                                    );
+                                })
+                            )}
                         </View>
-                        <View style={styles.activityText}>
-                            <Text style={styles.activityTitle}>Crew Request Received</Text>
-                            <Text style={styles.activityTime}>5 hours ago • 3 applicants</Text>
+                    )}
+
+                    {/* Generic Recent Activity for other roles */}
+                    {user?.role !== 'trip_planner' && (
+                        <View>
+                            <View style={styles.recentHeader}>
+                                <Text style={styles.sectionTitle}>Recent Activity</Text>
+                            </View>
+                            <View style={styles.activityCard}>
+                                <View style={styles.activityIcon}>
+                                    <Ionicons name="boat-outline" size={20} color="#2563eb" />
+                                </View>
+                                <View style={styles.activityText}>
+                                    <Text style={styles.activityTitle}>Ocean Queen Arrived</Text>
+                                    <Text style={styles.activityTime}>2 hours ago • Galle Harbor</Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                            </View>
+                            <View style={styles.activityCard}>
+                                <View style={styles.activityIcon}>
+                                    <Ionicons name="people" size={20} color="#16a34a" />
+                                </View>
+                                <View style={styles.activityText}>
+                                    <Text style={styles.activityTitle}>Crew Request Received</Text>
+                                    <Text style={styles.activityTime}>5 hours ago • 3 applicants</Text>
+                                </View>
+                                <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                            </View>
                         </View>
-                        <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
-                    </View>
-                    
+                    )}
+
                     <View style={{ height: 100 }} />
                 </ScrollView>
             )}
@@ -468,7 +561,96 @@ const styles = StyleSheet.create({
         fontSize: 14,
         color: '#64748b',
         fontWeight: '600',
-    }
+    },
+    // ── Finished trip cards ─────────────────────────────────
+    tripCard: {
+        backgroundColor: '#fff',
+        borderRadius: 22,
+        padding: 18,
+        marginBottom: 14,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.06,
+        shadowRadius: 10,
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: '#f1f5f9',
+    },
+    tripStatusBadge: {
+        alignSelf: 'flex-start',
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderRadius: 8,
+        marginBottom: 12,
+    },
+    tripStatusText: {
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.5,
+    },
+    tripCardHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        marginBottom: 14,
+    },
+    tripIconBox: {
+        width: 44,
+        height: 44,
+        borderRadius: 14,
+        backgroundColor: '#eff6ff',
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    tripVesselName: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1e293b',
+    },
+    tripDate: {
+        fontSize: 12,
+        color: '#64748b',
+        fontWeight: '500',
+        marginTop: 2,
+    },
+    tripStatsRow: {
+        flexDirection: 'row',
+        backgroundColor: '#f8fafc',
+        borderRadius: 14,
+        padding: 12,
+        alignItems: 'center',
+    },
+    tripStat: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    tripStatDivider: {
+        width: 1,
+        height: 30,
+        backgroundColor: '#e2e8f0',
+    },
+    tripStatLabel: {
+        fontSize: 10,
+        color: '#94a3b8',
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        marginBottom: 4,
+    },
+    tripStatValue: {
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#1e293b',
+    },
+    emptyTrips: {
+        alignItems: 'center',
+        paddingVertical: 30,
+    },
+    emptyTripsText: {
+        marginTop: 10,
+        fontSize: 14,
+        color: '#94a3b8',
+        fontWeight: '600',
+    },
 });
 
 

@@ -12,14 +12,21 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { uploadToServer } from '../api/uploadService';
 
-const ImageUploadButton = ({ onImageUploaded, initialImage, bucket = 'marine-storage', folder = 'uploads', label = 'Select Image' }) => {
+const ImageUploadButton = ({ 
+    onImageUploaded, 
+    initialImage, 
+    folder = 'uploads', 
+    label = 'Select Image',
+    showPreview = true,
+    style = {}
+}) => {
     const [image, setImage] = useState(initialImage);
     const [uploading, setUploading] = useState(false);
 
     const pickImage = async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Sorry, we need camera roll permissions to make this work!');
+            Alert.alert('Permission Denied', 'Sorry, we need gallery permissions!');
             return;
         }
 
@@ -38,7 +45,7 @@ const ImageUploadButton = ({ onImageUploaded, initialImage, bucket = 'marine-sto
     const takePhoto = async () => {
         const { status } = await ImagePicker.requestCameraPermissionsAsync();
         if (status !== 'granted') {
-            Alert.alert('Permission Denied', 'Sorry, we need camera permissions to make this work!');
+            Alert.alert('Permission Denied', 'Sorry, we need camera permissions!');
             return;
         }
 
@@ -57,19 +64,18 @@ const ImageUploadButton = ({ onImageUploaded, initialImage, bucket = 'marine-sto
         setUploading(true);
         try {
             const publicUrl = await uploadToServer(uri);
-            setImage(publicUrl);
+            if (showPreview) setImage(publicUrl);
             onImageUploaded(publicUrl);
         } catch (error) {
-            Alert.alert('Error', 'Failed to upload image to server.');
-            console.error(error);
+            Alert.alert('Error', 'Failed to upload image.');
         } finally {
             setUploading(false);
         }
     };
 
     return (
-        <View style={styles.container}>
-            {image ? (
+        <View style={[styles.container, style]}>
+            {showPreview && image ? (
                 <View style={styles.imageWrapper}>
                     <Image source={{ uri: image }} style={styles.image} />
                     <TouchableOpacity style={styles.removeBtn} onPress={() => setImage(null)}>
@@ -78,21 +84,27 @@ const ImageUploadButton = ({ onImageUploaded, initialImage, bucket = 'marine-sto
                 </View>
             ) : (
                 <View style={styles.buttonContainer}>
-                    <TouchableOpacity style={styles.uploadBtn} onPress={pickImage} disabled={uploading}>
+                    <TouchableOpacity 
+                        style={[styles.uploadBtn, style]} 
+                        onPress={pickImage} 
+                        disabled={uploading}
+                    >
                         {uploading ? (
                             <ActivityIndicator color="#2563eb" />
                         ) : (
                             <>
-                                <Ionicons name="image-outline" size={32} color="#2563eb" />
-                                <Text style={styles.uploadText}>{label}</Text>
+                                <Ionicons name="image-outline" size={showPreview ? 32 : 24} color="#2563eb" />
+                                <Text style={[styles.uploadText, !showPreview && { fontSize: 10 }]}>{label}</Text>
                             </>
                         )}
                     </TouchableOpacity>
                     
-                    <TouchableOpacity style={[styles.uploadBtn, styles.cameraBtn]} onPress={takePhoto} disabled={uploading}>
-                        <Ionicons name="camera-outline" size={32} color="#fff" />
-                        <Text style={[styles.uploadText, { color: '#fff' }]}>Take Photo</Text>
-                    </TouchableOpacity>
+                    {showPreview && (
+                        <TouchableOpacity style={[styles.uploadBtn, styles.cameraBtn]} onPress={takePhoto} disabled={uploading}>
+                            <Ionicons name="camera-outline" size={32} color="#fff" />
+                            <Text style={[styles.uploadText, { color: '#fff' }]}>Take Photo</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             )}
         </View>
@@ -100,10 +112,10 @@ const ImageUploadButton = ({ onImageUploaded, initialImage, bucket = 'marine-sto
 };
 
 const styles = StyleSheet.create({
-    container: { marginVertical: 10 },
+    container: { marginVertical: 5 },
     buttonContainer: { flexDirection: 'row', gap: 10 },
     uploadBtn: { 
-        flex: 1,
+        minWidth: 100,
         height: 100, 
         borderWidth: 2, 
         borderColor: '#e2e8f0', 
@@ -111,7 +123,8 @@ const styles = StyleSheet.create({
         borderRadius: 16, 
         justifyContent: 'center', 
         alignItems: 'center',
-        backgroundColor: '#f8fafc'
+        backgroundColor: '#f8fafc',
+        padding: 10
     },
     cameraBtn: {
         backgroundColor: '#2563eb',

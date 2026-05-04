@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { uploadToServer } from '../api/uploadService';
 import MapComponent from '../components/MapComponent';
 import ImageUploadButton from '../components/ImageUploadButton';
+import * as Location from 'expo-location';
 
 
 const { width } = Dimensions.get('window');
@@ -124,6 +125,35 @@ const ProfileScreen = ({ navigation }) => {
             } finally {
                 setLoading(false);
             }
+        }
+    };
+
+    const handleUpdateLocation = async () => {
+        try {
+            setLoading(true);
+            let { status } = await Location.requestForegroundPermissionsAsync();
+            if (status !== 'granted') {
+                Alert.alert('Permission Denied', 'Permission to access location was denied');
+                return;
+            }
+
+            let location = await Location.getCurrentPositionAsync({});
+            const { latitude, longitude } = location.coords;
+
+            const response = await client.put('/api/users/profile', {
+                latitude,
+                longitude
+            });
+
+            const updatedUser = response.data;
+            setUser(updatedUser);
+            await AsyncStorage.setItem('userData', JSON.stringify(updatedUser));
+            Alert.alert("Location Updated 📍", "Your precise mapping location has been saved.");
+        } catch (error) {
+            console.error("Location update error:", error);
+            Alert.alert("Error", "Could not get your location. Please check your GPS settings.");
+        } finally {
+            setLoading(false);
         }
     };
 
@@ -318,16 +348,30 @@ const ProfileScreen = ({ navigation }) => {
 
                     {/* Location Map */}
                     <View style={styles.mapCard}>
-                        <Text style={styles.cardTitle}>Your Location</Text>
-                        {address ? (
-                            <MapComponent address1={address} />
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.cardTitle}>Your Location</Text>
+                            <TouchableOpacity 
+                                style={styles.pinLocationBtn} 
+                                onPress={handleUpdateLocation}
+                                disabled={loading}
+                            >
+                                <Ionicons name="locate" size={18} color="#2563eb" />
+                                <Text style={styles.pinLocationText}>Pin Precise GPS</Text>
+                            </TouchableOpacity>
+                        </View>
+                        
+                        {(user?.latitude || address) ? (
+                            <MapComponent 
+                                address1={!user?.latitude ? address : null} 
+                                coord1={user?.latitude ? { lat: user.latitude, lon: user.longitude } : null}
+                            />
                         ) : (
                             <View style={styles.noAddressContainer}>
                                 <Ionicons name="map-outline" size={40} color="#94a3b8" />
                                 <Text style={styles.noAddressText}>Update your address to see it on map</Text>
                             </View>
                         )}
-                        <Text style={styles.mapHint}>Map generated using OpenStreetMap (Free)</Text>
+                        <Text style={styles.mapHint}>GPS Pinning ensures customers see the correct delivery path.</Text>
                     </View>
 
 
@@ -599,6 +643,22 @@ const styles = StyleSheet.create({
         color: '#ef4444',
         fontSize: 16,
         fontWeight: '700',
+    },
+    pinLocationBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#eff6ff',
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        borderRadius: 10,
+        gap: 6,
+        borderWidth: 1,
+        borderColor: '#bfdbfe',
+    },
+    pinLocationText: {
+        fontSize: 12,
+        fontWeight: '700',
+        color: '#2563eb',
     },
     noAddressContainer: {
         height: 200,

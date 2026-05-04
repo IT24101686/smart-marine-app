@@ -64,7 +64,45 @@ export const getMyVessels = async (req, res) => {
                 { currentRenter: req.user._id, status: 'rented' }
             ]
         });
-        res.status(200).json(vessels);
+
+        // Auto-check for due maintenance
+        const today = new Date();
+        const updatedVessels = vessels.map(v => {
+            const vObj = v.toObject();
+            if (vObj.nextMaintenanceDate && new Date(vObj.nextMaintenanceDate) <= today && vObj.status === 'available') {
+                vObj.status = 'service-due';
+            }
+            return vObj;
+        });
+
+        res.status(200).json(updatedVessels);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// @desc    Record maintenance for a vessel
+export const recordMaintenance = async (req, res) => {
+    const { lastMaintenanceDate, nextMaintenanceDate, notes, status } = req.body;
+
+    try {
+        const vessel = await Vessel.findById(req.params.id);
+
+        if (vessel) {
+            if (vessel.ownerId.toString() !== req.user._id.toString()) {
+                return res.status(401).json({ message: "Not authorized" });
+            }
+
+            vessel.lastMaintenanceDate = lastMaintenanceDate || new Date();
+            vessel.nextMaintenanceDate = nextMaintenanceDate;
+            vessel.maintenanceNotes = notes;
+            vessel.status = status || 'available';
+
+            const updatedVessel = await vessel.save();
+            res.status(200).json(updatedVessel);
+        } else {
+            res.status(404).json({ message: "Vessel not found" });
+        }
     } catch (error) {
         res.status(500).json({ message: error.message });
     }

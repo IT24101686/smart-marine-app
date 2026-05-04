@@ -18,7 +18,21 @@ const userSchema = new mongoose.Schema({
     shopName: { type: String },
     shopAddress: { type: String },
     isVerified: { type: Boolean, default: false },
-    profileImage: { type: String, default: "" }
+    profileImage: { type: String, default: "" },
+    latitude: { type: Number },
+    longitude: { type: Number },
+    cart: [{
+        tripId: { type: mongoose.Schema.Types.ObjectId, ref: 'Trip' },
+        fishType: String,
+        weight: Number,
+        price: Number,
+        buyerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+        buyerName: String,
+        image: String,
+        availableStock: Number
+    }],
+    rating: { type: Number, default: 0 },
+    totalRatings: { type: Number, default: 0 },
 }, { timestamps: true });
 
 // Hash password before saving
