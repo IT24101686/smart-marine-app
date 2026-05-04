@@ -9,9 +9,9 @@ const generateToken = (id) => {
 };
 
 export const registerUser = async (req, res) => {
-    const { 
+    const {
         name, email, password, phone, role, district, address,
-        boatName, boatLicense, shopName, shopAddress 
+        boatName, boatLicense, shopName, shopAddress
     } = req.body;
 
     try {
@@ -20,9 +20,9 @@ export const registerUser = async (req, res) => {
             return res.status(400).json({ message: "User already exists" });
         }
 
-        const newUser = new User({ 
+        const newUser = new User({
             name, email, password, phone, role, district, address,
-            boatName, boatLicense, shopName, shopAddress 
+            boatName, boatLicense, shopName, shopAddress
         });
         const savedUser = await newUser.save();
 
@@ -39,17 +39,17 @@ export const registerUser = async (req, res) => {
             await vessel.save();
         }
 
-        res.status(201).json({ 
-            message: "User registered successfully", 
-            user: { 
+        res.status(201).json({
+            message: "User registered successfully",
+            user: {
                 _id: savedUser._id,
-                name, 
-                email, 
-                role, 
+                name,
+                email,
+                role,
                 district,
                 address,
                 token: generateToken(savedUser._id)
-            } 
+            }
         });
     } catch (error) {
         res.status(500).json({ message: error.message });

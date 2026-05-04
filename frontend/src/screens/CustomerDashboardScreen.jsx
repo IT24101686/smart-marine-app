@@ -49,7 +49,7 @@ const CustomerDashboardScreen = ({ navigation }) => {
                 fetchRecentOrders();
                 fetchCart();
             }
-            return () => {};
+            return () => { };
         }, [user])
     );
 
@@ -174,7 +174,7 @@ const CustomerDashboardScreen = ({ navigation }) => {
         })();
 
         setCart(updatedCart);
-        
+
         // Save to DB
         try {
             await client.post('/api/users/cart', { cart: updatedCart });
@@ -196,9 +196,9 @@ const CustomerDashboardScreen = ({ navigation }) => {
                     <Text style={styles.carouselTitle}>Featured Fresh Catches</Text>
                     <Text style={styles.liveBadge}>LIVE</Text>
                 </View>
-                <ScrollView 
-                    horizontal 
-                    showsHorizontalScrollIndicator={false} 
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
                     snapToInterval={width * 0.75 + 20}
                     decelerationRate="fast"
                     contentContainerStyle={styles.carouselScroll}
@@ -207,8 +207,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
                         const type = Object.keys(item.summary?.catchBreakdown || {})[0] || 'Fish';
                         return (
                             <TouchableOpacity key={idx} style={styles.heroCard}>
-                                <LinearGradient 
-                                    colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']} 
+                                <LinearGradient
+                                    colors={['rgba(0,0,0,0)', 'rgba(0,0,0,0.8)']}
                                     style={styles.heroGradient}
                                 />
                                 {item.catches?.[0]?.photos?.[0] ? (
@@ -238,8 +238,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
 
     const renderMarketGrid = () => {
         // Flat inventory is already typed
-        const allProducts = selectedType === 'All' 
-            ? availableCatches 
+        const allProducts = selectedType === 'All'
+            ? availableCatches
             : availableCatches.filter(i => i.fishType === selectedType);
 
         if (allProducts.length === 0 && availableCatches.length > 0) return null;
@@ -249,7 +249,7 @@ const CustomerDashboardScreen = ({ navigation }) => {
                 <View style={styles.sectionHeaderRow}>
                     <Text style={styles.sectionTitle}>Market Explorer</Text>
                 </View>
-                
+
                 <View style={styles.gridContainer}>
                     {allProducts.map((item, index) => (
                         <View key={item._id} style={styles.miniCatchCard}>
@@ -297,7 +297,7 @@ const CustomerDashboardScreen = ({ navigation }) => {
 
                                 <View style={styles.miniPriceRow}>
                                     <Text style={styles.miniPrice}>LKR {((buyerPricesMap[item.sellerId?._id]?.find(p => p.fishType === item.fishType)?.retailPriceB) || (marketRates.find(r => r.fishType === item.fishType)?.retailPriceB) || 1300).toLocaleString()}</Text>
-                                    <TouchableOpacity 
+                                    <TouchableOpacity
                                         onPress={() => addToCart(item)}
                                         style={styles.miniAddBtn}
                                     >

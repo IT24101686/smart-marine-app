@@ -183,7 +183,7 @@ const BuyerDashboardScreen = ({ navigation }) => {
         try {
             const res = await client.get('/api/inventory/my');
             const data = Array.isArray(res.data) ? res.data : [];
-            
+
             const inv = {};
             data.forEach(item => {
                 const type = item.fishType;
@@ -193,7 +193,7 @@ const BuyerDashboardScreen = ({ navigation }) => {
                 inv[type].total += item.weight;
                 if (item.grade === 'Grade A') inv[type].gradeA += item.weight;
                 if (item.grade === 'Grade B') inv[type].gradeB += item.weight;
-                
+
                 inv[type].items.push({
                     _id: item._id,
                     vesselName: item.tripId?.vesselId?.name || "Market",
@@ -216,8 +216,8 @@ const BuyerDashboardScreen = ({ navigation }) => {
             const available = data.filter(t => t.status === 'completed');
             setAvailableCatches(available);
             setFilteredCatches(available);
-            
-            fetchMyInventory(); 
+
+            fetchMyInventory();
         } catch (error) {
             console.error('Fetch catches error:', error);
         } finally {
@@ -443,7 +443,7 @@ const BuyerDashboardScreen = ({ navigation }) => {
                         </View>
 
                         <View style={{ flexDirection: 'row', gap: 12, alignItems: 'center' }}>
-                            <TouchableOpacity 
+                            <TouchableOpacity
                                 onPress={openRateModal}
                                 style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.15)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, gap: 5 }}
                             >

@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    FlatList, 
-    TouchableOpacity, 
-    Image, 
+import {
+    View,
+    Text,
+    StyleSheet,
+    FlatList,
+    TouchableOpacity,
+    Image,
     ActivityIndicator,
     Alert,
     Dimensions
@@ -49,7 +49,7 @@ const FishermanDashboardScreen = ({ navigation }) => {
             // Fetch my active trips (where I am crew)
             const myTripsResponse = await client.get('/api/trips/my-trips');
             const active = myTripsResponse.data.find(t => t.status === 'planned' || t.status === 'ongoing');
-            
+
             if (active) {
                 // Fetch full details of the active trip to get crew names
                 const detailsResponse = await client.get(`/api/trips/${active._id}`);
@@ -81,9 +81,9 @@ const FishermanDashboardScreen = ({ navigation }) => {
 
     const renderTripCard = ({ item }) => (
         <View style={styles.tripCard}>
-            <Image 
-                source={item.vesselId.image ? { uri: item.vesselId.image } : require('../../assets/adaptive-icon.png')} 
-                style={styles.vesselImage} 
+            <Image
+                source={item.vesselId.image ? { uri: item.vesselId.image } : require('../../assets/adaptive-icon.png')}
+                style={styles.vesselImage}
             />
             <View style={styles.cardOverlay}>
                 <LinearGradient
@@ -98,7 +98,7 @@ const FishermanDashboardScreen = ({ navigation }) => {
                     </View>
                 </LinearGradient>
             </View>
-            
+
             <View style={styles.cardBody}>
                 <View style={styles.infoRow}>
                     <Ionicons name="calendar-outline" size={18} color="#2563eb" />
@@ -125,7 +125,7 @@ const FishermanDashboardScreen = ({ navigation }) => {
                     <Text style={styles.crewSub}>Current requests: {item.requests.length}</Text>
                 </View>
 
-                <TouchableOpacity 
+                <TouchableOpacity
                     style={[styles.joinButton, activeTrip && styles.disabledJoinButton]}
                     onPress={() => !activeTrip && handleJoinRequest(item._id)}
                     disabled={!!activeTrip}
@@ -177,14 +177,14 @@ const FishermanDashboardScreen = ({ navigation }) => {
                             <View style={styles.activeTripContainer}>
                                 <Text style={styles.sectionTitle}>My Current Trip</Text>
                                 <View style={styles.activeTripCard}>
-                                    <Image 
-                                        source={activeTrip.vesselId.image ? { uri: activeTrip.vesselId.image } : require('../../assets/adaptive-icon.png')} 
-                                        style={styles.activeVesselImage} 
+                                    <Image
+                                        source={activeTrip.vesselId.image ? { uri: activeTrip.vesselId.image } : require('../../assets/adaptive-icon.png')}
+                                        style={styles.activeVesselImage}
                                     />
                                     <View style={styles.activeCardContent}>
                                         <Text style={styles.activeVesselName}>{activeTrip.vesselId.name}</Text>
                                         <Text style={styles.activeTripStatus}>Status: {activeTrip.status.toUpperCase()}</Text>
-                                        
+
                                         <View style={styles.crewSection}>
                                             <Text style={styles.crewHeader}>My Crew Members:</Text>
                                             <View style={styles.crewList}>

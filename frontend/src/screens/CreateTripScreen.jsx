@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    ScrollView, 
-    TouchableOpacity, 
-    TextInput, 
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    TextInput,
     Alert,
     Platform,
     ActivityIndicator
@@ -42,7 +42,7 @@ const CreateTripScreen = ({ route, navigation }) => {
             const response = await client.get('/api/vessels/my-vessels');
             const vesselList = response.data;
             setVessels(vesselList);
-            
+
             if (vesselIdFromParams) {
                 const found = vesselList.find(v => v._id === vesselIdFromParams);
                 if (found) setSelectedVessel(found);
@@ -75,7 +75,7 @@ const CreateTripScreen = ({ route, navigation }) => {
                 foodCost: parseFloat(foodCost) || 0,
                 baitCost: parseFloat(baitCost) || 0
             });
-            
+
             Alert.alert("Success", "Trip planned successfully!");
             navigation.goBack();
         } catch (error) {
@@ -111,8 +111,8 @@ const CreateTripScreen = ({ route, navigation }) => {
                     <Text style={styles.label}>Select Vessel</Text>
                     <View style={styles.vesselList}>
                         {vessels.map((v) => (
-                            <TouchableOpacity 
-                                key={v._id} 
+                            <TouchableOpacity
+                                key={v._id}
                                 style={[styles.vesselItem, selectedVessel?._id === v._id && styles.selectedVesselItem]}
                                 onPress={() => setSelectedVessel(v)}
                             >
@@ -146,7 +146,7 @@ const CreateTripScreen = ({ route, navigation }) => {
                             </View>
                         </View>
                     </View>
-                    
+
                     <Text style={styles.label}>Planned Duration</Text>
                     <View style={styles.inputBox}>
                         <TextInput style={styles.flexInput} value={plannedDuration} onChangeText={setPlannedDuration} />

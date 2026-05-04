@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    ScrollView, 
-    TouchableOpacity, 
-    Image, 
-    TextInput, 
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    Image,
+    TextInput,
     Alert,
     ActivityIndicator,
     Modal
@@ -213,7 +213,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             <View style={styles.catchHeader}>
                                 <Text style={styles.fishType}>{c.fishType}</Text>
                                 <View style={[
-                                    styles.gradeBadge, 
+                                    styles.gradeBadge,
                                     { backgroundColor: c.grade === 'Grade A' ? '#dcfce7' : c.grade === 'Grade B' ? '#fef9c3' : '#fee2e2' }
                                 ]}>
                                     <Text style={[
@@ -255,8 +255,8 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             <Text style={styles.label}>Fish Type / Category</Text>
                             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
                                 {fishTypes.map((t) => (
-                                    <TouchableOpacity 
-                                        key={t} 
+                                    <TouchableOpacity
+                                        key={t}
                                         style={[styles.chip, fishType === t && styles.chipActive]}
                                         onPress={() => setFishType(t)}
                                     >
@@ -266,7 +266,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             </ScrollView>
 
                             <Text style={styles.label}>Weight (kg)</Text>
-                            <TextInput 
+                            <TextInput
                                 style={styles.input}
                                 placeholder="e.g. 25.5"
                                 keyboardType="numeric"
@@ -277,8 +277,8 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             <Text style={styles.label}>Quality Grade</Text>
                             <View style={styles.gradeContainer}>
                                 {['Grade A', 'Grade B', 'Grade C'].map((g) => (
-                                    <TouchableOpacity 
-                                        key={g} 
+                                    <TouchableOpacity
+                                        key={g}
                                         style={[styles.gradeItem, grade === g && styles.activeGrade]}
                                         onPress={() => setGrade(g)}
                                     >
@@ -303,13 +303,13 @@ const ActiveTripScreen = ({ route, navigation }) => {
                                 ))}
                             </ScrollView>
 
-                            <TouchableOpacity 
-                                style={[styles.saveBtn, uploading && styles.disabledBtn]} 
+                            <TouchableOpacity
+                                style={[styles.saveBtn, uploading && styles.disabledBtn]}
                                 onPress={handleLogCatch}
                                 disabled={uploading}
                             >
-                                {uploading 
-                                    ? <ActivityIndicator color="#fff" /> 
+                                {uploading
+                                    ? <ActivityIndicator color="#fff" />
                                     : <Text style={styles.saveBtnText}>Save Catch</Text>
                                 }
                             </TouchableOpacity>
@@ -343,8 +343,8 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             <View style={styles.modalLoader}>
                                 <Ionicons name="fish-outline" size={60} color="#cbd5e1" />
                                 <Text style={styles.emptyText}>No catches recorded for this trip yet.{'\n'}Add catches before ending the trip.</Text>
-                                <TouchableOpacity 
-                                    style={[styles.saveBtn, { marginTop: 20 }]} 
+                                <TouchableOpacity
+                                    style={[styles.saveBtn, { marginTop: 20 }]}
                                     onPress={() => setEndModalVisible(false)}
                                 >
                                     <Text style={styles.saveBtnText}>Go Back</Text>
@@ -398,7 +398,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
                                     </View>
                                 ))}
 
-                                <TouchableOpacity 
+                                <TouchableOpacity
                                     style={[styles.endTripBtn, savingPrices && styles.disabledBtn]}
                                     onPress={handleSavePricesAndEnd}
                                     disabled={savingPrices}

@@ -86,7 +86,7 @@ export const getAvailableTrips = async (req, res) => {
     const { district } = req.params;
     try {
         const nearby = getNearbyDistricts(district);
-        
+
         // Find planned trips where the planner is in the nearby districts
         const trips = await Trip.find({ status: 'planned' })
             .populate({
@@ -101,7 +101,7 @@ export const getAvailableTrips = async (req, res) => {
 
         // Filter out trips where plannerId didn't match the nearby districts
         let filteredTrips = trips.filter(t => t.plannerId !== null);
-        
+
         // Sort: Exact district match first, then neighbors
         filteredTrips.sort((a, b) => {
             if (a.plannerId.district === district && b.plannerId.district !== district) return -1;
@@ -220,7 +220,7 @@ export const buyTripCatch = async (req, res) => {
         // --- INVENTORY POPULATION ---
         // Transfer Grade A and B catches to the buyer's inventory
         for (const catchDoc of (trip.catches || [])) {
-            if (catchDoc.grade === 'Grade C') continue; 
+            if (catchDoc.grade === 'Grade C') continue;
             if (catchDoc.weight <= 0) continue;
 
             // Fetch Market Rate for this fish type to set a default retail price
@@ -739,7 +739,7 @@ export const rateCrew = async (req, res) => {
                 user.totalRatings = newTotalRatings;
                 user.rating = newAverageRating;
                 await user.save();
-                
+
                 // Notify fisherman about the new rating
                 createNotification(
                     user._id,
