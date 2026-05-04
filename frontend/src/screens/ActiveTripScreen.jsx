@@ -24,8 +24,10 @@ const ActiveTripScreen = ({ route, navigation }) => {
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
 
-    // ── Log Catch Modal ──────────────────────────────────────
+    // ── Log/Edit Catch Modal ──────────────────────────────────────
     const [catchModalVisible, setCatchModalVisible] = useState(false);
+    const [isEditingCatch, setIsEditingCatch] = useState(false);
+    const [editingCatchId, setEditingCatchId] = useState(null);
     const [fishType, setFishType] = useState('');
     const [weight, setWeight] = useState('');
     const [grade, setGrade] = useState('Grade A');
@@ -42,7 +44,15 @@ const ActiveTripScreen = ({ route, navigation }) => {
 
     useEffect(() => {
         fetchTripDetails();
+        requestPermissions();
     }, []);
+
+    const requestPermissions = async () => {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+            Alert.alert('Permission Denied', 'Sorry, we need camera roll permissions to make this work!');
+        }
+    };
 
     const fetchTripDetails = async () => {
         try {
@@ -59,7 +69,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
     // ── Catch Image Upload ────────────────────────────────────
     const pickCatchImage = async () => {
         let result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
             allowsMultipleSelection: true,
             quality: 0.7,
         });
@@ -80,7 +90,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
         }
     };
 
-    // ── Log Catch Submit ──────────────────────────────────────
+    // ── Log/Update Catch Submit ──────────────────────────────────────
     const handleLogCatch = async () => {
         if (!fishType || !weight) {
             Alert.alert("Error", "Please fill type and weight");
@@ -89,24 +99,73 @@ const ActiveTripScreen = ({ route, navigation }) => {
 
         try {
             setUploading(true);
-            await client.post(`/api/trips/${tripId}/catch`, {
+            const payload = {
                 fishType,
                 grade,
                 weight: parseFloat(weight),
                 photos: catchImages
-            });
-            Alert.alert("Success", "Catch logged successfully!");
+            };
+
+            if (isEditingCatch) {
+                await client.put(`/api/trips/catch/${editingCatchId}`, payload);
+                Alert.alert("Success", "Catch updated successfully!");
+            } else {
+                await client.post(`/api/trips/${tripId}/catch`, payload);
+                Alert.alert("Success", "Catch logged successfully!");
+            }
+
             setCatchModalVisible(false);
-            setFishType('');
-            setWeight('');
-            setCatchImages([]);
+            resetCatchForm();
             fetchTripDetails();
         } catch (error) {
-            Alert.alert("Error", "Failed to log catch");
+            Alert.alert("Error", `Failed to ${isEditingCatch ? 'update' : 'log'} catch`);
             console.error(error);
         } finally {
             setUploading(false);
         }
+    };
+
+    const resetCatchForm = () => {
+        setFishType('');
+        setWeight('');
+        setGrade('Grade A');
+        setCatchImages([]);
+        setIsEditingCatch(false);
+        setEditingCatchId(null);
+    };
+
+    const handleEditCatch = (c) => {
+        setFishType(c.fishType);
+        setWeight(c.weight.toString());
+        setGrade(c.grade);
+        setCatchImages(c.photos || []);
+        setEditingCatchId(c._id);
+        setIsEditingCatch(true);
+        setCatchModalVisible(true);
+    };
+
+    const handleDeleteCatch = (catchId) => {
+        Alert.alert(
+            "Delete Catch",
+            "Are you sure you want to remove this record?",
+            [
+                { text: "Cancel", style: "cancel" },
+                {
+                    text: "Delete",
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            setLoading(true);
+                            await client.delete(`/api/trips/catch/${catchId}`);
+                            fetchTripDetails();
+                        } catch (error) {
+                            setLoading(false);
+                            Alert.alert("Error", "Failed to delete catch");
+                        }
+                    }
+                }
+            ]
+        );
     };
 
     // ── Open End Trip Modal ───────────────────────────────────
@@ -132,7 +191,6 @@ const ActiveTripScreen = ({ route, navigation }) => {
 
     // ── Save Prices & Complete Trip ───────────────────────────
     const handleSavePricesAndEnd = async () => {
-        // Validate all prices are filled
         const incomplete = tripFishTypes.some(ft => !priceInputs[ft.fishType] || parseFloat(priceInputs[ft.fishType]) <= 0);
         if (incomplete) {
             Alert.alert("Missing Prices", "Please enter a price per kg for every fish type.");
@@ -146,9 +204,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
 
         try {
             setSavingPrices(true);
-            // 1. Save fish prices
             await client.post(`/api/fish-prices/${tripId}`, { prices });
-            // 2. Complete the trip
             await client.put(`/api/trips/${tripId}/complete`);
             setEndModalVisible(false);
             navigation.replace('TripSummary', { tripId });
@@ -177,7 +233,6 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             <Ionicons name="arrow-back" size={28} color="#fff" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>Ongoing Trip</Text>
-                        {/* End Trip Button → opens price form */}
                         <TouchableOpacity onPress={openEndTripModal}>
                             <View style={styles.endBadge}>
                                 <Ionicons name="flag" size={13} color="#fff" />
@@ -189,7 +244,6 @@ const ActiveTripScreen = ({ route, navigation }) => {
             </LinearGradient>
 
             <ScrollView contentContainerStyle={styles.scrollContent}>
-                {/* Vessel Info Card */}
                 <View style={styles.boatCard}>
                     <Text style={styles.vesselName}>{trip?.vesselId?.name || 'Vessel'}</Text>
                     <View style={styles.statusRow}>
@@ -198,28 +252,36 @@ const ActiveTripScreen = ({ route, navigation }) => {
                     </View>
                 </View>
 
-                {/* Recorded Catches Header */}
                 <View style={styles.sectionHeader}>
                     <Text style={styles.sectionTitle}>Recorded Catches</Text>
-                    <TouchableOpacity style={styles.addBtn} onPress={() => setCatchModalVisible(true)}>
+                    <TouchableOpacity style={styles.addBtn} onPress={() => { resetCatchForm(); setCatchModalVisible(true); }}>
                         <Ionicons name="add" size={24} color="#fff" />
                     </TouchableOpacity>
                 </View>
 
-                {/* Catch Cards */}
                 {trip?.catches && trip.catches.length > 0 ? (
                     trip.catches.map((c, index) => (
-                        <View key={index} style={styles.catchCard}>
+                        <View key={c._id || index} style={styles.catchCard}>
                             <View style={styles.catchHeader}>
-                                <Text style={styles.fishType}>{c.fishType}</Text>
-                                <View style={[
-                                    styles.gradeBadge,
-                                    { backgroundColor: c.grade === 'Grade A' ? '#dcfce7' : c.grade === 'Grade B' ? '#fef9c3' : '#fee2e2' }
-                                ]}>
-                                    <Text style={[
-                                        styles.gradeText,
-                                        { color: c.grade === 'Grade A' ? '#166534' : c.grade === 'Grade B' ? '#854d0e' : '#991b1b' }
-                                    ]}>{c.grade}</Text>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={styles.fishType}>{c.fishType}</Text>
+                                    <View style={[
+                                        styles.gradeBadge,
+                                        { backgroundColor: c.grade === 'Grade A' ? '#dcfce7' : c.grade === 'Grade B' ? '#fef9c3' : '#fee2e2' }
+                                    ]}>
+                                        <Text style={[
+                                            styles.gradeText,
+                                            { color: c.grade === 'Grade A' ? '#166534' : c.grade === 'Grade B' ? '#854d0e' : '#991b1b' }
+                                        ]}>{c.grade}</Text>
+                                    </View>
+                                </View>
+                                <View style={styles.catchActions}>
+                                    <TouchableOpacity onPress={() => handleEditCatch(c)} style={styles.actionIcon}>
+                                        <Ionicons name="create-outline" size={22} color="#2563eb" />
+                                    </TouchableOpacity>
+                                    <TouchableOpacity onPress={() => handleDeleteCatch(c._id)} style={styles.actionIcon}>
+                                        <Ionicons name="trash-outline" size={22} color="#ef4444" />
+                                    </TouchableOpacity>
                                 </View>
                             </View>
                             <Text style={styles.weightText}>{String(c.weight)} kg</Text>
@@ -238,14 +300,12 @@ const ActiveTripScreen = ({ route, navigation }) => {
                 )}
             </ScrollView>
 
-            {/* ════════════════════════════════════════════
-                LOG NEW CATCH MODAL
-            ════════════════════════════════════════════ */}
+            {/* LOG / EDIT CATCH MODAL */}
             <Modal visible={catchModalVisible} animationType="slide" transparent>
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
                         <View style={styles.modalHeader}>
-                            <Text style={styles.modalTitle}>Log New Catch</Text>
+                            <Text style={styles.modalTitle}>{isEditingCatch ? 'Edit Catch Quality' : 'Log New Catch'}</Text>
                             <TouchableOpacity onPress={() => setCatchModalVisible(false)}>
                                 <Ionicons name="close" size={28} color="#64748b" />
                             </TouchableOpacity>
@@ -310,7 +370,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             >
                                 {uploading
                                     ? <ActivityIndicator color="#fff" />
-                                    : <Text style={styles.saveBtnText}>Save Catch</Text>
+                                    : <Text style={styles.saveBtnText}>{isEditingCatch ? 'Update Record' : 'Save Catch'}</Text>
                                 }
                             </TouchableOpacity>
                         </ScrollView>
@@ -318,9 +378,7 @@ const ActiveTripScreen = ({ route, navigation }) => {
                 </View>
             </Modal>
 
-            {/* ════════════════════════════════════════════
-                END TRIP — SET FISH PRICES MODAL
-            ════════════════════════════════════════════ */}
+            {/* END TRIP — SET FISH PRICES MODAL */}
             <Modal visible={endModalVisible} animationType="slide" transparent>
                 <View style={styles.modalContainer}>
                     <View style={styles.modalContent}>
@@ -343,16 +401,12 @@ const ActiveTripScreen = ({ route, navigation }) => {
                             <View style={styles.modalLoader}>
                                 <Ionicons name="fish-outline" size={60} color="#cbd5e1" />
                                 <Text style={styles.emptyText}>No catches recorded for this trip yet.{'\n'}Add catches before ending the trip.</Text>
-                                <TouchableOpacity
-                                    style={[styles.saveBtn, { marginTop: 20 }]}
-                                    onPress={() => setEndModalVisible(false)}
-                                >
+                                <TouchableOpacity style={[styles.saveBtn, { marginTop: 20 }]} onPress={() => setEndModalVisible(false)}>
                                     <Text style={styles.saveBtnText}>Go Back</Text>
                                 </TouchableOpacity>
                             </View>
                         ) : (
                             <ScrollView showsVerticalScrollIndicator={false}>
-                                {/* Summary Banner */}
                                 <View style={styles.summaryBanner}>
                                     <Ionicons name="information-circle-outline" size={18} color="#2563eb" />
                                     <Text style={styles.summaryText}>
@@ -365,18 +419,10 @@ const ActiveTripScreen = ({ route, navigation }) => {
                                         <View style={styles.priceRowLeft}>
                                             <Text style={styles.priceRowFish}>{ft.fishType}</Text>
                                             <View style={styles.priceRowMeta}>
-                                                <Text style={styles.priceRowWeight}>
-                                                    Total: {String(ft.totalWeight)} kg
-                                                </Text>
+                                                <Text style={styles.priceRowWeight}>Total: {String(ft.totalWeight)} kg</Text>
                                                 {ft.grades.map(g => (
-                                                    <View key={g} style={[
-                                                        styles.gradePill,
-                                                        { backgroundColor: g === 'Grade A' ? '#dcfce7' : g === 'Grade B' ? '#fef9c3' : '#fee2e2' }
-                                                    ]}>
-                                                        <Text style={[
-                                                            styles.gradePillText,
-                                                            { color: g === 'Grade A' ? '#166534' : g === 'Grade B' ? '#854d0e' : '#991b1b' }
-                                                        ]}>{g}</Text>
+                                                    <View key={g} style={[styles.gradePill, { backgroundColor: g === 'Grade A' ? '#dcfce7' : g === 'Grade B' ? '#fef9c3' : '#fee2e2' }]}>
+                                                        <Text style={[styles.gradePillText, { color: g === 'Grade A' ? '#166534' : g === 'Grade B' ? '#854d0e' : '#991b1b' }]}>{g}</Text>
                                                     </View>
                                                 ))}
                                             </View>
@@ -388,24 +434,15 @@ const ActiveTripScreen = ({ route, navigation }) => {
                                                 placeholder="0.00"
                                                 keyboardType="numeric"
                                                 value={priceInputs[ft.fishType]}
-                                                onChangeText={(val) => setPriceInputs(prev => ({
-                                                    ...prev,
-                                                    [ft.fishType]: val
-                                                }))}
+                                                onChangeText={(val) => setPriceInputs(prev => ({ ...prev, [ft.fishType]: val }))}
                                             />
                                             <Text style={styles.perKgLabel}>/kg</Text>
                                         </View>
                                     </View>
                                 ))}
 
-                                <TouchableOpacity
-                                    style={[styles.endTripBtn, savingPrices && styles.disabledBtn]}
-                                    onPress={handleSavePricesAndEnd}
-                                    disabled={savingPrices}
-                                >
-                                    {savingPrices ? (
-                                        <ActivityIndicator color="#fff" />
-                                    ) : (
+                                <TouchableOpacity style={[styles.endTripBtn, savingPrices && styles.disabledBtn]} onPress={handleSavePricesAndEnd} disabled={savingPrices}>
+                                    {savingPrices ? <ActivityIndicator color="#fff" /> : (
                                         <>
                                             <Ionicons name="flag" size={20} color="#fff" />
                                             <Text style={styles.saveBtnText}>Save Prices & End Trip</Text>
@@ -439,15 +476,15 @@ const styles = StyleSheet.create({
     catchCard: { backgroundColor: '#fff', padding: 16, borderRadius: 20, marginBottom: 16, borderLeftWidth: 4, borderLeftColor: '#2563eb' },
     catchHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     fishType: { fontSize: 16, fontWeight: '800', color: '#1e293b' },
-    gradeBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+    gradeBadge: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginTop: 4 },
     gradeText: { fontSize: 10, fontWeight: '800' },
-    weightText: { fontSize: 14, color: '#64748b', marginTop: 4, fontWeight: '600' },
+    weightText: { fontSize: 14, color: '#64748b', marginTop: 8, fontWeight: '600' },
+    catchActions: { flexDirection: 'row', gap: 12 },
+    actionIcon: { padding: 4 },
     catchPhotos: { marginTop: 12 },
     miniPhoto: { width: 60, height: 60, borderRadius: 8, marginRight: 8, backgroundColor: '#f1f5f9' },
     emptyContainer: { alignItems: 'center', marginTop: 40 },
     emptyText: { marginTop: 16, color: '#94a3b8', fontSize: 14, textAlign: 'center', lineHeight: 22 },
-
-    // ── Modals ────────────────────────────────────────────────
     modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
     modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 32, borderTopRightRadius: 32, padding: 24, maxHeight: '85%' },
     modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 },
@@ -455,8 +492,6 @@ const styles = StyleSheet.create({
     modalSubtitle: { fontSize: 13, color: '#64748b', fontWeight: '500', marginTop: 2 },
     modalLoader: { alignItems: 'center', paddingVertical: 40 },
     loadingText: { marginTop: 12, color: '#64748b', fontSize: 14 },
-
-    // ── Catch Form ────────────────────────────────────────────
     label: { fontSize: 14, fontWeight: '700', color: '#64748b', marginBottom: 8, marginTop: 16 },
     input: { backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 12, padding: 14, fontSize: 16, fontWeight: '600', color: '#1e293b' },
     chipRow: { flexDirection: 'row', marginBottom: 5 },
@@ -476,8 +511,6 @@ const styles = StyleSheet.create({
     saveBtn: { backgroundColor: '#2563eb', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 16, borderRadius: 16, marginTop: 24, marginBottom: 20 },
     disabledBtn: { backgroundColor: '#94a3b8' },
     saveBtnText: { color: '#fff', fontSize: 17, fontWeight: '800' },
-
-    // ── End Trip / Price Form ─────────────────────────────────
     summaryBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#eff6ff', borderRadius: 14, padding: 14, marginBottom: 16, borderWidth: 1, borderColor: '#bfdbfe' },
     summaryText: { flex: 1, fontSize: 13, color: '#2563eb', fontWeight: '600', lineHeight: 20 },
     priceRow: { backgroundColor: '#f8fafc', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#e2e8f0' },
@@ -492,7 +525,6 @@ const styles = StyleSheet.create({
     priceInput: { flex: 1, fontSize: 22, fontWeight: '800', color: '#1e293b', paddingVertical: 8 },
     perKgLabel: { fontSize: 13, fontWeight: '600', color: '#64748b', marginLeft: 6 },
     endTripBtn: { backgroundColor: '#ef4444', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', gap: 8, paddingVertical: 16, borderRadius: 16, marginTop: 10, marginBottom: 24 },
-
     loader: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 });
 

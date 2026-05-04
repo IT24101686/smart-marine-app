@@ -233,3 +233,76 @@ export const cancelOrder = async (req, res) => {
     }
 };
 
+// @desc    Update order items (by buyer to adjust weights)
+// @route   PUT /api/orders/:id/items
+// @access  Private
+export const updateOrderItems = async (req, res) => {
+    const { items } = req.body; // [{ fishType, grade, weight, price }]
+    try {
+        const order = await Order.findById(req.params.id);
+        if (!order) return res.status(404).json({ message: "Order not found" });
+
+        if (order.buyerId.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ message: "Not authorized" });
+        }
+
+        if (order.status !== 'pending' && order.status !== 'processing') {
+            return res.status(400).json({ message: "Can only edit pending orders" });
+        }
+
+        // Adjust Inventory for each changed item
+        for (const newItem of items) {
+            const oldItem = order.items.find(i => i.fishType === newItem.fishType && i.grade === newItem.grade);
+            if (!oldItem) continue;
+
+            const weightDiff = newItem.weight - oldItem.weight;
+
+            if (weightDiff > 0) {
+                // Need more stock
+                const inventoryBatches = await Inventory.find({
+                    sellerId: order.buyerId,
+                    fishType: newItem.fishType,
+                    grade: newItem.grade,
+                    weight: { $gt: 0 }
+                }).sort({ createdAt: 1 });
+
+                let toDeduct = weightDiff;
+                for (const batch of inventoryBatches) {
+                    if (toDeduct <= 0) break;
+                    const deduct = Math.min(batch.weight, toDeduct);
+                    batch.weight -= deduct;
+                    toDeduct -= deduct;
+                    await batch.save();
+                }
+                if (toDeduct > 0) {
+                    return res.status(400).json({ message: `Not enough additional stock for ${newItem.fishType}` });
+                }
+            } else if (weightDiff < 0) {
+                // Restore stock
+                const restoreAmount = Math.abs(weightDiff);
+                let inventoryItem = await Inventory.findOne({
+                    sellerId: order.buyerId,
+                    fishType: newItem.fishType,
+                    grade: newItem.grade
+                }).sort({ createdAt: -1 });
+
+                if (inventoryItem) {
+                    inventoryItem.weight += restoreAmount;
+                    await inventoryItem.save();
+                }
+            }
+        }
+
+        // Calculate new total
+        const newTotal = items.reduce((sum, it) => sum + (it.weight * it.price), 0);
+
+        order.items = items;
+        order.totalPrice = newTotal;
+        await order.save();
+
+        res.status(200).json({ message: "Order updated successfully", order });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+

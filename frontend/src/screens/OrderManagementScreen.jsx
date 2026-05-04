@@ -9,7 +9,8 @@ import {
     Alert,
     Dimensions,
     Modal,
-    ScrollView
+    ScrollView,
+    TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -27,6 +28,12 @@ const OrderManagementScreen = ({ navigation }) => {
     const [expandedMapId, setExpandedMapId] = useState(null);
     const [selectedOrderForInvoice, setSelectedOrderForInvoice] = useState(null);
     const [invoiceVisible, setInvoiceVisible] = useState(false);
+
+    // ── Edit Order States ────────────────────────────────────
+    const [editModalVisible, setEditModalVisible] = useState(false);
+    const [editingOrder, setEditingOrder] = useState(null);
+    const [editedItems, setEditedItems] = useState([]); // [{ fishType, grade, weight, price }]
+    const [updating, setUpdating] = useState(false);
 
     useEffect(() => {
         loadData();
@@ -81,7 +88,6 @@ const OrderManagementScreen = ({ navigation }) => {
         );
     };
 
-
     const handlePayOrder = async (orderId) => {
         try {
             setLoading(true);
@@ -104,6 +110,27 @@ const OrderManagementScreen = ({ navigation }) => {
         } catch (error) {
             Alert.alert("Error", "Failed to update status");
         }
+    };
+
+    // ── Update Items Submit ───────────────────────────────────
+    const handleUpdateItems = async () => {
+        setUpdating(true);
+        try {
+            await client.put(`/api/orders/${editingOrder._id}/items`, { items: editedItems });
+            Alert.alert("Success", "Order items updated successfully");
+            setEditModalVisible(false);
+            fetchOrders(user.role);
+        } catch (error) {
+            Alert.alert("Error", error.response?.data?.message || "Failed to update order");
+        } finally {
+            setUpdating(false);
+        }
+    };
+
+    const openEditModal = (order) => {
+        setEditingOrder(order);
+        setEditedItems(JSON.parse(JSON.stringify(order.items))); // Deep copy
+        setEditModalVisible(true);
     };
 
     const getStatusColor = (status) => {
@@ -176,9 +203,21 @@ const OrderManagementScreen = ({ navigation }) => {
                     </TouchableOpacity>
                 )}
 
+                {user?.role === 'main_buyer' && (item.status === 'pending' || item.status === 'processing') && (
+                    <TouchableOpacity
+                        style={[styles.actionBtn, styles.editBtn]}
+                        onPress={() => openEditModal(item)}
+                    >
+                        <Ionicons name="create-outline" size={18} color="#2563eb" />
+                        <Text style={[styles.btnText, { color: '#2563eb' }]}>Edit</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
+            <View style={styles.actionButtons}>
                 {user?.role === 'customer' && item.status === 'confirmed' && (
                     <TouchableOpacity
-                        style={[styles.actionBtn, { backgroundColor: '#8b5cf6', flex: 1, marginRight: 10 }]}
+                        style={[styles.actionBtn, { backgroundColor: '#8b5cf6', flex: 1 }]}
                         onPress={() => handlePayOrder(item._id)}
                     >
                         <Ionicons name="card-outline" size={20} color="#fff" />
@@ -300,6 +339,52 @@ const OrderManagementScreen = ({ navigation }) => {
                 />
             )}
 
+            {/* ══════════ EDIT ORDER ITEMS MODAL ══════════ */}
+            <Modal visible={editModalVisible} animationType="slide" transparent>
+                <View style={styles.modalOverlay}>
+                    <View style={styles.editModal}>
+                        <View style={styles.invoiceHeader}>
+                            <Text style={styles.invoiceTitle}>ADJUST QUANTITIES</Text>
+                            <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                                <Ionicons name="close-circle" size={28} color="#64748b" />
+                            </TouchableOpacity>
+                        </View>
+
+                        <ScrollView>
+                            {editedItems.map((item, index) => (
+                                <View key={index} style={styles.editRow}>
+                                    <View style={{ flex: 1 }}>
+                                        <Text style={styles.itemText}>{item.fishType}</Text>
+                                        <Text style={styles.orderDate}>{item.grade}</Text>
+                                    </View>
+                                    <View style={styles.weightInputWrapper}>
+                                        <TextInput
+                                            style={styles.weightInput}
+                                            value={String(item.weight)}
+                                            keyboardType="numeric"
+                                            onChangeText={(val) => {
+                                                const newItems = [...editedItems];
+                                                newItems[index].weight = parseFloat(val) || 0;
+                                                setEditedItems(newItems);
+                                            }}
+                                        />
+                                        <Text style={styles.kgLabel}>kg</Text>
+                                    </View>
+                                </View>
+                            ))}
+                        </ScrollView>
+
+                        <TouchableOpacity
+                            style={[styles.saveBtn, updating && { opacity: 0.7 }]}
+                            onPress={handleUpdateItems}
+                            disabled={updating}
+                        >
+                            {updating ? <ActivityIndicator color="#fff" /> : <Text style={styles.saveBtnText}>Update Order Items</Text>}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+
             {/* ══════════ DIGITAL INVOICE MODAL ══════════ */}
             <Modal
                 animationType="slide"
@@ -413,14 +498,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 24, 
         paddingTop: 10 
     },
-    backBtn: { 
-        width: 45, 
-        height: 45, 
-        borderRadius: 15, 
-        backgroundColor: 'rgba(255,255,255,0.15)', 
-        justifyContent: 'center', 
-        alignItems: 'center' 
-    },
     title: { color: '#fff', fontSize: 22, fontWeight: '900', letterSpacing: 0.5 },
     listContent: { padding: 20 },
     orderCard: { 
@@ -466,16 +543,24 @@ const styles = StyleSheet.create({
     customerCancelBtn: { backgroundColor: '#fef2f2', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 12, borderWidth: 1, borderColor: '#fee2e2' },
     cancelText: { color: '#ef4444', fontSize: 13, fontWeight: '800' },
     actionButtons: { flexDirection: 'row', gap: 12, marginTop: 15 },
-    actionBtn: { flex: 1, height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8 },
-    confirmBtn: { backgroundColor: '#2563eb' },
-    cancelBtn: { backgroundColor: '#f1f5f9' },
-    deliverBtn: { backgroundColor: '#16a34a', marginTop: 15 },
-    trackBtn: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe', marginTop: 15 },
-    invoiceBtn: { backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: '#a7f3d0', marginTop: 15, marginRight: 10, flex: 0.8 },
+    actionBtn: { height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', flexDirection: 'row', gap: 8, paddingHorizontal: 15 },
+    confirmBtn: { backgroundColor: '#2563eb', flex: 1 },
+    cancelBtn: { backgroundColor: '#f1f5f9', flex: 1 },
+    editBtn: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
+    trackBtn: { backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
+    invoiceBtn: { backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: '#a7f3d0', flex: 1 },
     
-    // Modal & Invoice Styles
+    // Modal Styles
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', padding: 20 },
     invoiceModal: { backgroundColor: '#fff', borderRadius: 32, padding: 24, maxHeight: '90%' },
+    editModal: { backgroundColor: '#fff', borderRadius: 24, padding: 24, maxHeight: '70%' },
+    editRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', paddingBottom: 15 },
+    weightInputWrapper: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#f8fafc', borderRadius: 12, paddingHorizontal: 10, borderWidth: 1, borderColor: '#e2e8f0' },
+    weightInput: { fontSize: 16, fontWeight: '800', color: '#1e3a8a', width: 60, paddingVertical: 8, textAlign: 'center' },
+    kgLabel: { fontSize: 12, color: '#64748b', fontWeight: '700', marginLeft: 5 },
+    saveBtn: { backgroundColor: '#2563eb', paddingVertical: 16, borderRadius: 16, alignItems: 'center', marginTop: 10 },
+    saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+
     invoiceHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
     invoiceTitle: { fontSize: 16, fontWeight: '900', color: '#1e293b', letterSpacing: 1 },
     brandHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 30, paddingBottom: 20, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },

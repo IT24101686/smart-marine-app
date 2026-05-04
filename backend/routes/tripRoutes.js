@@ -13,6 +13,7 @@ import {
     getTripFinances,
     sellGradeC,
     deleteTrip,
+    updateTrip,
     removeCrewMember,
     rejectFisherman,
     updateTripPrices,
@@ -26,7 +27,9 @@ import {
     logCatch, 
     startTrip, 
     completeTrip, 
-    rescheduleTrip 
+    rescheduleTrip,
+    updateCatch,
+    deleteCatch
 } from '../controllers/catchController.js';
 import { protect } from '../middleware/authMiddleware.js';
 
@@ -46,6 +49,7 @@ router.get('/ongoing/:district', protect, getDistrictOngoingCatches);
 
 router.route('/:id')
     .get(protect, getTripDetails)
+    .put(protect, updateTrip)
     .delete(protect, deleteTrip);
 
 router.get('/:id/summary', protect, getTripSummary);
@@ -65,5 +69,9 @@ router.put('/:id/prices', protect, updateTripPrices);
 router.put('/:id/attendance', protect, markAttendance);
 router.put('/:id/reschedule', protect, rescheduleTrip);
 router.post('/:id/rate-crew', protect, rateCrew);
+
+// Individual Catch CRUD
+router.put('/catch/:catchId', protect, updateCatch);
+router.delete('/catch/:catchId', protect, deleteCatch);
 
 export default router;

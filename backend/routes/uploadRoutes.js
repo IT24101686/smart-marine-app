@@ -32,6 +32,7 @@ router.post('/', upload.single('image'), async (req, res) => {
         if (supabaseUrl && supabaseKey) {
             try {
                 console.log(`📤 Uploading to Supabase bucket: ${bucketName}`);
+                console.log(`🔗 Supabase URL: ${supabaseUrl}`);
 
                 const { data, error } = await supabase.storage
                     .from(bucketName)

@@ -12,9 +12,5 @@ router.put('/profile', protect, updateUserProfile);
 router.post('/cart', protect, updateCart);
 router.get('/cart', protect, getCart);
 
-export default router;
-console.log(`❌ Unmatched User Route: ${req.method} ${req.url}`);
-res.status(404).json({ message: `User sub-route ${req.method} ${req.url} not found` });
-});
 
 export default router;

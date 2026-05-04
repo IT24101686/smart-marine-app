@@ -22,6 +22,7 @@ const FishermanDashboardScreen = ({ navigation }) => {
     const [loading, setLoading] = useState(true);
     const [availableTrips, setAvailableTrips] = useState([]);
     const [activeTrip, setActiveTrip] = useState(null);
+    const [completedTrips, setCompletedTrips] = useState([]);
     const [user, setUser] = useState(null);
 
     useEffect(() => {
@@ -46,14 +47,19 @@ const FishermanDashboardScreen = ({ navigation }) => {
             const response = await client.get(`/api/trips/available/${district}`);
             setAvailableTrips(response.data);
 
-            // Fetch my active trips (where I am crew)
+            // Fetch my trips (active and completed)
             const myTripsResponse = await client.get('/api/trips/my-trips');
-            const active = myTripsResponse.data.find(t => t.status === 'planned' || t.status === 'ongoing');
+            const allMyTrips = myTripsResponse.data || [];
+            
+            const active = allMyTrips.find(t => t.status === 'planned' || t.status === 'ongoing');
+            const completed = allMyTrips.filter(t => t.status === 'completed' || t.status === 'sold');
+            setCompletedTrips(completed);
 
             if (active) {
-                // Fetch full details of the active trip to get crew names
                 const detailsResponse = await client.get(`/api/trips/${active._id}`);
                 setActiveTrip(detailsResponse.data);
+            } else {
+                setActiveTrip(null);
             }
 
             setLoading(false);
@@ -199,6 +205,35 @@ const FishermanDashboardScreen = ({ navigation }) => {
                                     </View>
                                 </View>
                                 <Text style={[styles.sectionTitle, { marginTop: 20 }]}>Available Trips to Join</Text>
+                            </View>
+                        )
+                    }
+                    ListFooterComponent={
+                        completedTrips.length > 0 && (
+                            <View style={styles.completedSection}>
+                                <Text style={styles.sectionTitle}>Completed Trips & Payouts</Text>
+                                {completedTrips.map((trip) => (
+                                    <TouchableOpacity 
+                                        key={trip._id} 
+                                        style={styles.completedCard}
+                                        onPress={() => navigation.navigate('TripSummary', { tripId: trip._id })}
+                                    >
+                                        <View style={styles.completedIcon}>
+                                            <Ionicons name="checkmark-circle" size={24} color="#16a34a" />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text style={styles.completedVessel}>{trip.vesselId?.name}</Text>
+                                            <Text style={styles.completedDate}>{new Date(trip.departureTime).toLocaleDateString()}</Text>
+                                        </View>
+                                        <View style={styles.payoutInfo}>
+                                            <Text style={styles.payoutLabel}>Status</Text>
+                                            <Text style={[styles.payoutValue, { color: trip.status === 'sold' ? '#16a34a' : '#2563eb' }]}>
+                                                {trip.status === 'sold' ? 'PAYOUT READY' : 'COMPLETED'}
+                                            </Text>
+                                        </View>
+                                        <Ionicons name="chevron-forward" size={20} color="#cbd5e1" />
+                                    </TouchableOpacity>
+                                ))}
                             </View>
                         )
                     }
@@ -439,6 +474,55 @@ const styles = StyleSheet.create({
         fontWeight: '600',
         color: '#2563eb',
     },
+    sectionTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        color: '#1e293b',
+        marginBottom: 12,
+    },
+    completedSection: {
+        marginTop: 40,
+        paddingBottom: 40,
+    },
+    completedCard: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        backgroundColor: '#fff',
+        padding: 16,
+        borderRadius: 20,
+        marginBottom: 12,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.03,
+        shadowRadius: 8,
+        elevation: 2,
+    },
+    completedIcon: {
+        marginRight: 15,
+    },
+    completedVessel: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#1e293b',
+    },
+    completedDate: {
+        fontSize: 12,
+        color: '#64748b',
+    },
+    payoutInfo: {
+        alignItems: 'flex-end',
+        marginRight: 10,
+    },
+    payoutLabel: {
+        fontSize: 10,
+        color: '#94a3b8',
+        fontWeight: '700',
+        textTransform: 'uppercase',
+    },
+    payoutValue: {
+        fontSize: 12,
+        fontWeight: '800',
+    }
 });
 
 

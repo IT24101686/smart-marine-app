@@ -5,9 +5,9 @@ export const uploadToServer = async (uri) => {
         const formData = new FormData();
         
         // Prepare the file object for FormData
-        const filename = uri.split('/').pop();
+        const filename = uri.split('/').pop() || 'image.jpg';
         const match = /\.(\w+)$/.exec(filename);
-        const type = match ? `image/${match[1]}` : `image`;
+        const type = match ? `image/${match[1]}` : `image/jpeg`;
 
         formData.append('image', {
             uri: uri,
@@ -19,6 +19,7 @@ export const uploadToServer = async (uri) => {
             headers: {
                 'Content-Type': 'multipart/form-data',
             },
+            transformRequest: (data) => data, // Important for some axios versions
         });
 
         return response.data.url;

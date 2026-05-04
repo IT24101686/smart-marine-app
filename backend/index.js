@@ -12,6 +12,8 @@ import uploadRoutes from './routes/uploadRoutes.js';
 import fishPriceRoutes from './routes/fishPriceRoutes.js';
 import buyerPriceRoutes from './routes/buyerPriceRoutes.js';
 import inventoryRoutes from './routes/inventoryRoutes.js';
+import payoutRoutes from './routes/payoutRoutes.js';
+import reviewRoutes from './routes/reviewRoutes.js';
 import { seedRates } from './controllers/marketRateController.js';
 import dns from "node:dns/promises";
 dns.setServers(["1.1.1.1", "8.8.8.8"]);
@@ -49,6 +51,8 @@ app.use('/api/upload', uploadRoutes);
 app.use('/api/buyer-prices', buyerPriceRoutes);
 app.use('/api/fish-prices', fishPriceRoutes);
 app.use('/api/inventory', inventoryRoutes);
+app.use('/api/payouts', payoutRoutes);
+app.use('/api/reviews', reviewRoutes);
 
 
 

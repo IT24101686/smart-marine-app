@@ -22,6 +22,7 @@ const tripSchema = new mongoose.Schema({
     maxFishermen: { type: Number, required: true },
     minFishermen: { type: Number, default: 1 },
     departureTime: { type: Date, required: true },
+    actualDepartureTime: { type: Date },
     returnTime: { type: Date },
     tripType: {
         type: String,
@@ -60,6 +61,7 @@ const tripSchema = new mongoose.Schema({
     attendance: [{
         userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
         isPresent: { type: Boolean, default: false },
+        reason: { type: String, default: '' },
         markedAt: { type: Date, default: Date.now }
     }],
     isAttendanceMarked: { type: Boolean, default: false },

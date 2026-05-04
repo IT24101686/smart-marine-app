@@ -19,6 +19,28 @@ export const createTrip = async (req, res) => {
     } = req.body;
 
     try {
+        const vessel = await Vessel.findById(vesselId);
+        if (!vessel) {
+            return res.status(404).json({ message: "Vessel not found" });
+        }
+
+        // Authorization Logic:
+        const isOwner = vessel.ownerId.toString() === req.user._id.toString();
+        const isRenter = vessel.currentRenter && vessel.currentRenter.toString() === req.user._id.toString();
+
+        let finalTripType = tripType || 'direct';
+        
+        if (vessel.status === 'rented') {
+            if (!isRenter) {
+                return res.status(403).json({ message: "Only the current renter can plan trips for this rented vessel" });
+            }
+            finalTripType = 'rental';
+        } else {
+            if (!isOwner) {
+                return res.status(403).json({ message: "You are not the owner of this vessel" });
+            }
+        }
+
         const trip = new Trip({
             vesselId,
             plannerId: req.user._id,
@@ -26,8 +48,8 @@ export const createTrip = async (req, res) => {
             maxFishermen,
             minFishermen,
             departureTime,
-            tripType,
-            rentalAmount,
+            tripType: finalTripType,
+            rentalAmount: finalTripType === 'rental' ? (vessel.rentalPrice || rentalAmount) : 0,
             plannedDuration,
             notes,
             fuelCost,
@@ -262,8 +284,9 @@ export const buyTripCatch = async (req, res) => {
         if (vessel) {
             // 1. Owner share
             const isRented = vessel.status === 'rented' || (vessel.isAvailableForRent && vessel.currentRenter);
+            const isUpfront = vessel.rentalPaymentTerm === 'upfront';
 
-            if (isRented) {
+            if (isRented && !isUpfront) {
                 const days = Math.max(1, Math.ceil((new Date() - new Date(trip.departureTime)) / (1000 * 60 * 60 * 24)));
                 const rentalFee = (vessel.rentalPrice || 0) * days;
                 ownerEarnings = rentalFee;
@@ -272,10 +295,12 @@ export const buyTripCatch = async (req, res) => {
                 if (vessel.ownerId) {
                     payoutRecords.push({
                         tripId: trip._id,
-                        userId: vessel.ownerId,
+                        receiverId: vessel.ownerId,
+                        payerId: trip.plannerId,
                         role: 'boat_owner',
                         amount: ownerEarnings,
-                        type: 'rental'          // ✅ matches Payout enum
+                        type: 'rental',
+                        status: 'pending'
                     });
                 }
             } else {
@@ -285,10 +310,12 @@ export const buyTripCatch = async (req, res) => {
                 if (vessel.ownerId) {
                     payoutRecords.push({
                         tripId: trip._id,
-                        userId: vessel.ownerId,
+                        receiverId: vessel.ownerId,
+                        payerId: trip.plannerId,
                         role: 'boat_owner',
                         amount: ownerEarnings,
-                        type: 'share'
+                        type: 'share',
+                        status: 'pending'
                     });
                 }
             }
@@ -300,16 +327,21 @@ export const buyTripCatch = async (req, res) => {
         const totalCrewShare = remainingProfit - plannerShare;
 
         if (trip.plannerId) {
+            // Planner's own profit (self-payout, marked as completed automatically)
             payoutRecords.push({
                 tripId: trip._id,
-                userId: trip.plannerId,
+                receiverId: trip.plannerId,
+                payerId: trip.plannerId,
                 role: 'trip_planner',
                 amount: plannerShare,
-                type: 'commission'
+                type: 'commission',
+                status: 'completed',
+                paidAt: new Date(),
+                completedAt: new Date()
             });
         }
 
-        // Crew payouts — prefer attendance list, fall back to full crew
+        // Crew payouts
         const attendance = trip.attendance || [];
         const presentCrew = attendance.filter(a => a.isPresent).map(a => a.userId);
         const crewList = presentCrew.length > 0 ? presentCrew : (trip.crew || []).map(c => c._id || c);
@@ -320,10 +352,12 @@ export const buyTripCatch = async (req, res) => {
             crewList.forEach(crewId => {
                 payoutRecords.push({
                     tripId: trip._id,
-                    userId: crewId,
+                    receiverId: crewId,
+                    payerId: trip.plannerId,
                     role: 'crew',
                     amount: perCrew,
-                    type: 'share'
+                    type: 'salary',
+                    status: 'pending'
                 });
             });
         }
@@ -553,6 +587,71 @@ export const getTripDetails = async (req, res) => {
     }
 };
 
+// @desc    Update a trip plan
+// @route   PUT /api/trips/:id
+// @access  Private
+export const updateTrip = async (req, res) => {
+    try {
+        const trip = await Trip.findById(req.params.id);
+
+        if (!trip) {
+            return res.status(404).json({ message: "Trip not found" });
+        }
+
+        // Only the planner or vessel owner can update
+        const vessel = await Vessel.findById(trip.vesselId);
+        if (trip.plannerId.toString() !== req.user._id.toString() && vessel.ownerId.toString() !== req.user._id.toString()) {
+            return res.status(401).json({ message: "Not authorized to update this trip" });
+        }
+
+        if (trip.status !== 'planned') {
+            return res.status(400).json({ message: "Can only update planned trips" });
+        }
+
+        const oldMax = trip.maxFishermen;
+
+        // Update fields
+        trip.vesselId = req.body.vesselId || trip.vesselId;
+        trip.maxFishermen = req.body.maxFishermen || trip.maxFishermen;
+        trip.minFishermen = req.body.minFishermen || trip.minFishermen;
+        trip.departureTime = req.body.departureTime || trip.departureTime;
+        trip.plannedDuration = req.body.plannedDuration || trip.plannedDuration;
+        trip.notes = req.body.notes || trip.notes;
+        trip.fuelCost = req.body.fuelCost !== undefined ? req.body.fuelCost : trip.fuelCost;
+        trip.foodCost = req.body.foodCost !== undefined ? req.body.foodCost : trip.foodCost;
+        trip.baitCost = req.body.baitCost !== undefined ? req.body.baitCost : trip.baitCost;
+
+        const updatedTrip = await trip.save();
+
+        // If max fishermen increased, notify nearby fishermen
+        if (trip.maxFishermen > oldMax) {
+            const planner = await User.findById(trip.plannerId);
+            const fishermen = await User.find({ 
+                role: 'fisherman', 
+                district: planner.district 
+            });
+
+            const notifications = fishermen.map(f => ({
+                userId: f._id,
+                title: "More slots available! 🎣",
+                message: `${planner.name} has increased the crew size for the trip on ${vessel.name}. Join now!`,
+                type: 'trip',
+                relatedId: trip._id
+            }));
+
+            // Using createNotification loop if insertMany not preferred, 
+            // but let's keep it simple for now
+            for (const n of notifications) {
+                createNotification(n.userId, n.title, n.message, n.type, n.relatedId);
+            }
+        }
+
+        res.status(200).json(updatedTrip);
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
 // @desc    Delete/Cancel a trip
 export const deleteTrip = async (req, res) => {
     try {
@@ -708,7 +807,21 @@ export const markAttendance = async (req, res) => {
 // @desc    Get user payouts
 export const getUserPayouts = async (req, res) => {
     try {
-        const payouts = await Payout.find({ userId: req.user._id }).populate('tripId', 'departureTime');
+        const { type } = req.query; // 'received' or 'to-pay'
+        let query = {};
+
+        if (type === 'to-pay') {
+            query = { payerId: req.user._id, receiverId: { $ne: req.user._id } };
+        } else {
+            query = { receiverId: req.user._id };
+        }
+
+        const payouts = await Payout.find(query)
+            .populate('tripId', 'departureTime status')
+            .populate('receiverId', 'name phone')
+            .populate('payerId', 'name phone')
+            .sort({ createdAt: -1 });
+
         res.status(200).json(payouts);
     } catch (error) {
         res.status(500).json({ message: error.message });

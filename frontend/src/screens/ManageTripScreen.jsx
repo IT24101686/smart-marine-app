@@ -7,7 +7,9 @@ import {
     TouchableOpacity, 
     Image, 
     ActivityIndicator,
-    Alert
+    Alert,
+    Modal,
+    TextInput
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -21,6 +23,10 @@ const ManageTripScreen = ({ route, navigation }) => {
     const [trip, setTrip] = useState(null);
     const [loading, setLoading] = useState(true);
     const [attendance, setAttendance] = useState({});
+    const [reasons, setReasons] = useState({});
+    const [showReasonModal, setShowReasonModal] = useState(false);
+    const [selectedUserForReason, setSelectedUserForReason] = useState(null);
+    const [tempReason, setTempReason] = useState('');
 
     useEffect(() => {
         fetchTripDetails();
@@ -33,10 +39,20 @@ const ManageTripScreen = ({ route, navigation }) => {
             
             // Initialize attendance state
             const initialAttendance = {};
-            response.data.crew.forEach(member => {
-                initialAttendance[member._id] = true; // Default to present
-            });
+            const initialReasons = {};
+            if (response.data.isAttendanceMarked) {
+                response.data.attendance.forEach(a => {
+                    initialAttendance[a.userId] = a.isPresent;
+                    initialReasons[a.userId] = a.reason || '';
+                });
+            } else {
+                response.data.crew.forEach(member => {
+                    initialAttendance[member._id] = true; // Default to present
+                    initialReasons[member._id] = '';
+                });
+            }
             setAttendance(initialAttendance);
+            setReasons(initialReasons);
             
             setLoading(false);
         } catch (error) {
@@ -71,11 +87,27 @@ const ManageTripScreen = ({ route, navigation }) => {
     };
 
     const toggleAttendance = (userId) => {
-        setAttendance(prev => ({
-            ...prev,
-            [userId]: !prev[userId]
-        }));
+        const currentlyPresent = attendance[userId];
+        if (currentlyPresent) {
+            // Turning to Absent, show modal
+            setSelectedUserForReason(userId);
+            setTempReason(reasons[userId] || '');
+            setShowReasonModal(true);
+        } else {
+            // Turning back to Present
+            setAttendance(prev => ({ ...prev, [userId]: true }));
+        }
     };
+
+    const saveReason = () => {
+        if (selectedUserForReason) {
+            setReasons(prev => ({ ...prev, [selectedUserForReason]: tempReason }));
+            setAttendance(prev => ({ ...prev, [selectedUserForReason]: false }));
+            setShowReasonModal(false);
+            setSelectedUserForReason(null);
+        }
+    };
+
     const handleStartJourney = async () => {
         const presentCrewCount = Object.values(attendance).filter(val => val === true).length;
         const minRequired = trip.minFishermen || 1;
@@ -94,7 +126,8 @@ const ManageTripScreen = ({ route, navigation }) => {
             // 1. Mark Attendance first
             const attendanceData = Object.keys(attendance).map(userId => ({
                 userId,
-                isPresent: attendance[userId]
+                isPresent: attendance[userId],
+                reason: reasons[userId] || ''
             }));
             
             await client.put(`/api/trips/${tripId}/attendance`, { attendance: attendanceData });
@@ -124,6 +157,31 @@ const ManageTripScreen = ({ route, navigation }) => {
         }
     };
 
+    const handleDeleteTrip = async () => {
+        Alert.alert(
+            "Cancel Trip",
+            "Are you sure you want to cancel this trip plan?",
+            [
+                { text: "No", style: "cancel" },
+                { 
+                    text: "Yes, Cancel", 
+                    style: "destructive",
+                    onPress: async () => {
+                        try {
+                            setLoading(true);
+                            await client.delete(`/api/trips/${tripId}`);
+                            Alert.alert("Success", "Trip cancelled successfully");
+                            navigation.goBack();
+                        } catch (error) {
+                            setLoading(false);
+                            Alert.alert("Error", error.response?.data?.message || "Failed to cancel trip");
+                        }
+                    }
+                }
+            ]
+        );
+    };
+
     if (loading && !trip) {
         return (
             <View style={styles.loader}>
@@ -141,7 +199,14 @@ const ManageTripScreen = ({ route, navigation }) => {
                             <Ionicons name="arrow-back" size={28} color="#fff" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>Manage Crew</Text>
-                        <View style={{ width: 28 }} />
+                        <View style={{ flexDirection: 'row', gap: 15 }}>
+                            <TouchableOpacity onPress={() => navigation.navigate('CreateTrip', { trip, isEditing: true })}>
+                                <Ionicons name="create-outline" size={24} color="#fff" />
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={handleDeleteTrip}>
+                                <Ionicons name="trash-outline" size={24} color="#fff" />
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </SafeAreaView>
             </LinearGradient>
@@ -224,11 +289,9 @@ const ManageTripScreen = ({ route, navigation }) => {
 
                 {trip.crew.length > 0 ? (
                     trip.crew.map((member) => (
-                        <TouchableOpacity 
+                        <View 
                             key={member._id} 
                             style={[styles.userCard, !attendance[member._id] && styles.absentCard]}
-                            onPress={() => toggleAttendance(member._id)}
-                            activeOpacity={0.7}
                         >
                             <Image 
                                 source={member.profileImage ? { uri: member.profileImage } : require('../../assets/adaptive-icon.png')} 
@@ -239,17 +302,20 @@ const ManageTripScreen = ({ route, navigation }) => {
                                 <Text style={styles.userDistrict}>{member.district}</Text>
                             </View>
                             
-                            <View style={[styles.attendanceToggle, attendance[member._id] ? styles.presentToggle : styles.absentToggle]}>
+                            <TouchableOpacity 
+                                onPress={() => toggleAttendance(member._id)}
+                                style={[styles.attendanceBtn, attendance[member._id] ? styles.presentBtn : styles.absentBtn]}
+                            >
                                 <Ionicons 
-                                    name={attendance[member._id] ? "checkmark-circle" : "close-circle"} 
+                                    name={attendance[member._id] ? "checkbox" : "square-outline"} 
                                     size={24} 
-                                    color={attendance[member._id] ? "#22c55e" : "#ef4444"} 
+                                    color={attendance[member._id] ? "#16a34a" : "#94a3b8"} 
                                 />
-                                <Text style={[styles.attendanceText, { color: attendance[member._id] ? "#166534" : "#991b1b" }]}>
-                                    {attendance[member._id] ? "PRESENT" : "ABSENT"}
+                                <Text style={[styles.attendanceText, { color: attendance[member._id] ? "#16a34a" : "#64748b" }]}>
+                                    {attendance[member._id] ? "Present" : "Absent"}
                                 </Text>
-                            </View>
-                        </TouchableOpacity>
+                            </TouchableOpacity>
+                        </View>
                     ))
                 ) : (
                     <Text style={styles.emptyText}>No crew members joined yet.</Text>
@@ -293,6 +359,31 @@ const ManageTripScreen = ({ route, navigation }) => {
                     </TouchableOpacity>
                 </View>
             </ScrollView>
+
+            {/* Reason Modal */}
+            <Modal visible={showReasonModal} transparent animationType="fade">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <Text style={styles.modalTitle}>Absence Reason</Text>
+                        <Text style={styles.modalSub}>Why is this crew member absent?</Text>
+                        <TextInput 
+                            style={styles.modalInput}
+                            placeholder="Enter reason (e.g. Sick, Not informed...)"
+                            value={tempReason}
+                            onChangeText={setTempReason}
+                            multiline
+                        />
+                        <View style={styles.modalActions}>
+                            <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowReasonModal(false)}>
+                                <Text style={styles.cancelText}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.saveBtn} onPress={saveReason}>
+                                <Text style={styles.saveText}>Save Reason</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </View>
     );
 };
@@ -572,6 +663,68 @@ const styles = StyleSheet.create({
         color: '#ef4444',
         fontWeight: '700',
         flex: 1,
+    },
+    // Modal Styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 24
+    },
+    modalContent: {
+        backgroundColor: '#fff',
+        borderRadius: 24,
+        padding: 24,
+        width: '100%',
+        maxWidth: 400,
+        elevation: 10
+    },
+    modalTitle: {
+        fontSize: 20,
+        fontWeight: '800',
+        color: '#1e293b',
+        marginBottom: 8
+    },
+    modalSub: {
+        fontSize: 14,
+        color: '#64748b',
+        marginBottom: 16
+    },
+    modalInput: {
+        backgroundColor: '#f8fafc',
+        borderRadius: 12,
+        padding: 16,
+        height: 100,
+        textAlignVertical: 'top',
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        fontSize: 15,
+        color: '#1e293b'
+    },
+    modalActions: {
+        flexDirection: 'row',
+        justifyContent: 'flex-end',
+        marginTop: 20,
+        gap: 12
+    },
+    cancelBtn: {
+        paddingHorizontal: 20,
+        paddingVertical: 10
+    },
+    cancelText: {
+        color: '#64748b',
+        fontWeight: '700'
+    },
+    saveBtn: {
+        backgroundColor: '#2563eb',
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        borderRadius: 10
+    },
+    saveText: {
+        color: '#fff',
+        fontWeight: '700'
     }
 });
 

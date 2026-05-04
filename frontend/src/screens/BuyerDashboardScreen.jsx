@@ -245,14 +245,14 @@ const BuyerDashboardScreen = ({ navigation }) => {
         if (item.estimatedValue && item.estimatedValue > 0) return item.estimatedValue;
 
         // Fallback: compute locally using fishPrices + catchSummary
-        const breakdown = item.catchSummary?.catchBreakdown || {};
+        const detailsMap = item.catchSummary?.catchBreakdownDetails || {};
         const prices = item.fishPrices || [];
-        if (prices.length === 0 || Object.keys(breakdown).length === 0) return 0;
+        if (prices.length === 0 || Object.keys(detailsMap).length === 0) return 0;
 
         let total = 0;
         prices.forEach(p => {
-            const b = breakdown[p.fishType];
-            if (b) total += ((b.gradeA || 0) + (b.gradeB || 0)) * (p.pricePerKg || 0);
+            const d = detailsMap[p.fishType];
+            if (d) total += ((d.gradeA || 0) + (d.gradeB || 0)) * (p.pricePerKg || 0);
         });
         return total;
     };
@@ -352,8 +352,8 @@ const BuyerDashboardScreen = ({ navigation }) => {
                     <View style={styles.priceBreakdownBox}>
                         <Text style={styles.priceBreakdownTitle}>🏷️ Planner Selling Prices</Text>
                         {fishPrices.map((p, i) => {
-                            const b = breakdown[p.fishType] || {};
-                            const sellKg = (b.gradeA || 0) + (b.gradeB || 0);
+                            const details = (summary.catchBreakdownDetails && summary.catchBreakdownDetails[p.fishType]) || {};
+                            const sellKg = (details.gradeA || 0) + (details.gradeB || 0);
                             const lineVal = sellKg * (p.pricePerKg || 0);
                             return (
                                 <View key={i} style={styles.priceBreakdownRow}>

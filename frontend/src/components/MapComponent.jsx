@@ -148,19 +148,43 @@ const MapComponent = ({ address1, address2, coord1, coord2 }) => {
                         markers.push([c.lat, c.lon]);
                     });
 
-                    // Draw solid thick red line if multiple points
+                    // ── Actual Road Routing (OSRM) ──
                     if (markers.length > 1) {
-                        var polyline = L.polyline(markers, {
-                            color: '#ff0000',
-                            weight: 6,
-                            opacity: 0.85,
-                            lineJoin: 'round'
-                        }).addTo(map);
+                        var start = markers[0];
+                        var end = markers[1];
+                        var osrmUrl = 'https://router.project-osrm.org/route/v1/driving/' + 
+                                      start[1] + ',' + start[0] + ';' + end[1] + ',' + end[0] + 
+                                      '?overview=full&geometries=geojson';
+
+                        fetch(osrmUrl)
+                            .then(response => response.json())
+                            .then(data => {
+                                if (data.routes && data.routes.length > 0) {
+                                    var route = data.routes[0].geometry;
+                                    var polyline = L.geoJSON(route, {
+                                        style: {
+                                            color: '#ff0000', // Red route line
+                                            weight: 7,
+                                            opacity: 0.8,
+                                            lineJoin: 'round'
+                                        }
+                                    }).addTo(map);
+                                    
+                                    // Adjust bounds to fit the actual route
+                                    map.fitBounds(polyline.getBounds(), { padding: [40, 40] });
+                                } else {
+                                    // Fallback to straight line if OSRM fails
+                                    L.polyline(markers, { color: '#ff0000', weight: 5, dashArray: '10, 10' }).addTo(map);
+                                }
+                            })
+                            .catch(err => {
+                                L.polyline(markers, { color: '#ff0000', weight: 5, dashArray: '10, 10' }).addTo(map);
+                            });
                     }
                     
-                    var bounds = new L.LatLngBounds(markers);
-                    map.fitBounds(bounds, { padding: [50, 50] });
-                    if (coords.length === 1) map.setZoom(15);
+                    if (coords.length === 1) {
+                        map.setView([coords[0].lat, coords[0].lon], 15);
+                    }
                 }
 
             </script>

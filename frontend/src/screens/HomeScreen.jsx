@@ -1,11 +1,11 @@
 import React from 'react';
-import { 
-    View, 
-    Text, 
-    StyleSheet, 
-    ScrollView, 
-    TouchableOpacity, 
-    Image, 
+import {
+    View,
+    Text,
+    StyleSheet,
+    ScrollView,
+    TouchableOpacity,
+    Image,
     Dimensions,
     TextInput,
     ActivityIndicator,
@@ -24,6 +24,7 @@ const HomeScreen = ({ navigation }) => {
     const [user, setUser] = React.useState(null);
     const [loading, setLoading] = React.useState(true);
     const [finishedTrips, setFinishedTrips] = React.useState([]);
+    const [activeTrips, setActiveTrips] = React.useState([]);
     const [tripsLoading, setTripsLoading] = React.useState(false);
 
     React.useEffect(() => {
@@ -37,8 +38,8 @@ const HomeScreen = ({ navigation }) => {
                 try {
                     const parsed = JSON.parse(userData);
                     setUser(parsed);
-                    if (parsed.role === 'trip_planner') {
-                        fetchFinishedTrips();
+                    if (parsed.role === 'trip_planner' || parsed.role === 'boat_owner') {
+                        fetchTrips();
                     }
                 } catch (e) {
                     console.error('JSON Parse error:', e);
@@ -51,12 +52,17 @@ const HomeScreen = ({ navigation }) => {
         }
     };
 
-    const fetchFinishedTrips = async () => {
+    const fetchTrips = async () => {
         setTripsLoading(true);
         try {
             const res = await client.get('/api/trips/my-trips');
             const all = Array.isArray(res.data) ? res.data : [];
-            // Show completed + sold trips only
+            
+            // Active: Planned or Ongoing
+            const active = all.filter(t => ['planned', 'ongoing'].includes(t.status));
+            setActiveTrips(active);
+
+            // Finished: Completed or Sold
             const finished = all.filter(t => ['completed', 'sold'].includes(t.status));
             setFinishedTrips(finished);
         } catch (e) {
@@ -92,8 +98,8 @@ const HomeScreen = ({ navigation }) => {
 
                     {/* Logo Section */}
                     <View style={styles.logoContainer}>
-                        <Image 
-                            source={require('../../assets/logo.png')} 
+                        <Image
+                            source={require('../../assets/logo.png')}
                             style={styles.logo}
                             resizeMode="contain"
                         />
@@ -111,8 +117,8 @@ const HomeScreen = ({ navigation }) => {
                     {/* Search Bar */}
                     <View style={styles.searchBar}>
                         <Ionicons name="search" size={20} color="#64748b" />
-                        <TextInput 
-                            placeholder="Search for boats, trips, or buyers..." 
+                        <TextInput
+                            placeholder="Search for boats, trips, or buyers..."
                             style={styles.searchInput}
                         />
                     </View>
@@ -174,8 +180,8 @@ const HomeScreen = ({ navigation }) => {
 
                         {user?.role === 'main_buyer' && (
                             <>
-                                <TouchableOpacity 
-                                    style={styles.gridItem} 
+                                <TouchableOpacity
+                                    style={styles.gridItem}
                                     onPress={() => navigation.navigate('BuyerDashboard')}
                                 >
                                     <View style={[styles.iconCircle, { backgroundColor: '#fff7ed' }]}>
@@ -184,8 +190,8 @@ const HomeScreen = ({ navigation }) => {
                                     <Text style={styles.gridLabel}>Market Hub</Text>
                                 </TouchableOpacity>
 
-                                <TouchableOpacity 
-                                    style={styles.gridItem} 
+                                <TouchableOpacity
+                                    style={styles.gridItem}
                                     onPress={() => navigation.navigate('OrderManagement')}
                                 >
                                     <View style={[styles.iconCircle, { backgroundColor: '#f0fdf4' }]}>
@@ -198,8 +204,8 @@ const HomeScreen = ({ navigation }) => {
 
                         {user?.role === 'customer' && (
                             <>
-                                <TouchableOpacity 
-                                    style={styles.gridItem} 
+                                <TouchableOpacity
+                                    style={styles.gridItem}
                                     onPress={() => navigation.navigate('CustomerDashboard')}
                                 >
                                     <View style={[styles.iconCircle, { backgroundColor: '#f0fdf4' }]}>
@@ -207,8 +213,8 @@ const HomeScreen = ({ navigation }) => {
                                     </View>
                                     <Text style={styles.gridLabel}>Fish Market</Text>
                                 </TouchableOpacity>
-                                <TouchableOpacity 
-                                    style={styles.gridItem} 
+                                <TouchableOpacity
+                                    style={styles.gridItem}
                                     onPress={() => navigation.navigate('OrderManagement')}
                                 >
                                     <View style={[styles.iconCircle, { backgroundColor: '#eff6ff' }]}>
@@ -239,13 +245,47 @@ const HomeScreen = ({ navigation }) => {
                         </LinearGradient>
                     </View>
 
+                    {/* Active Trips Section — Planners & Owners */}
+                    {(user?.role === 'trip_planner' || user?.role === 'boat_owner') && activeTrips.length > 0 && (
+                        <View>
+                            <Text style={styles.sectionTitle}>Active Trips</Text>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                                {activeTrips.map((trip) => (
+                                    <TouchableOpacity 
+                                        key={trip._id} 
+                                        style={styles.activeTripCard}
+                                        onPress={() => {
+                                            if (trip.status === 'ongoing') {
+                                                navigation.navigate('ActiveTrip', { tripId: trip._id });
+                                            } else {
+                                                navigation.navigate('ManageTrip', { tripId: trip._id });
+                                            }
+                                        }}
+                                    >
+                                        <View style={styles.activeTripHeader}>
+                                            <View style={[styles.statusIndicator, { backgroundColor: trip.status === 'ongoing' ? '#ef4444' : '#3b82f6' }]} />
+                                            <Text style={styles.activeTripStatus}>{trip.status.toUpperCase()}</Text>
+                                        </View>
+                                        <Text style={styles.activeTripVessel}>{trip.vesselId?.name}</Text>
+                                        <Text style={styles.activeTripCrew}>{trip.crew?.length || 0} fishermen recruited</Text>
+                                        <View style={styles.activeTripFooter}>
+                                            <Text style={styles.manageLink}>{trip.status === 'ongoing' ? 'View Live' : 'Manage'}</Text>
+                                            <Ionicons name="chevron-forward" size={14} color="#2563eb" />
+                                        </View>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    )}
+
                     {/* Finished Trips Section — trip_planner only */}
                     {user?.role === 'trip_planner' && (
                         <View>
                             <View style={styles.recentHeader}>
                                 <Text style={styles.sectionTitle}>Previous Trips</Text>
-                                <TouchableOpacity onPress={fetchFinishedTrips}>
-                                    <Ionicons name="refresh" size={20} color="#2563eb" />
+                                <TouchableOpacity onPress={() => navigation.navigate('TripHistory')} style={styles.seeAllContainer}>
+                                    <Text style={styles.seeAllText}>See All</Text>
+                                    <Ionicons name="chevron-forward" size={16} color="#2563eb" />
                                 </TouchableOpacity>
                             </View>
 
@@ -258,10 +298,10 @@ const HomeScreen = ({ navigation }) => {
                                 </View>
                             ) : (
                                 finishedTrips.map((trip) => {
-                                    const isSold   = trip.status === 'sold';
-                                    const date     = new Date(trip.departureTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+                                    const isSold = trip.status === 'sold';
+                                    const date = new Date(trip.departureTime).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
                                     const crewCount = (trip.crew || []).length;
-                                    const revenue  = trip.totalRevenue || trip.estimatedRevenue || 0;
+                                    const revenue = trip.totalRevenue || trip.estimatedRevenue || 0;
                                     return (
                                         <TouchableOpacity
                                             key={trip._id}
@@ -515,7 +555,12 @@ const styles = StyleSheet.create({
         marginTop: 30,
         marginBottom: 16,
     },
-    seeAll: {
+    seeAllContainer: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    seeAllText: {
         color: '#2563eb',
         fontWeight: '700',
         fontSize: 14,
@@ -651,6 +696,65 @@ const styles = StyleSheet.create({
         color: '#94a3b8',
         fontWeight: '600',
     },
+    // ── Active Trips horizontal scroll ───────────────────────
+    horizontalScroll: {
+        marginHorizontal: -24,
+        paddingHorizontal: 24,
+        marginBottom: 10,
+    },
+    activeTripCard: {
+        backgroundColor: '#fff',
+        width: 200,
+        borderRadius: 24,
+        padding: 16,
+        marginRight: 15,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: '#f1f5f9'
+    },
+    activeTripHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        marginBottom: 8
+    },
+    statusIndicator: {
+        width: 8,
+        height: 8,
+        borderRadius: 4
+    },
+    activeTripStatus: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#64748b',
+        letterSpacing: 0.5
+    },
+    activeTripVessel: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1e293b',
+        marginBottom: 2
+    },
+    activeTripCrew: {
+        fontSize: 11,
+        color: '#64748b',
+        fontWeight: '600'
+    },
+    activeTripFooter: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 12,
+        gap: 4
+    },
+    manageLink: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#2563eb'
+    }
 });
 
 

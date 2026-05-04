@@ -2,8 +2,8 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const client = axios.create({
-    baseURL: 'https://smart-marine-app.onrender.com', // Render Production URL
-    // baseURL: 'http://192.168.8.137:3000', // Local Development URL
+    baseURL: 'http://192.168.8.137:3000', // Local Development URL
+    // baseURL: 'https://smart-marine-app.onrender.com', // Render Production URL
 });
 
 
@@ -27,10 +27,13 @@ client.interceptors.response.use(
         return response;
     },
     (error) => {
-        console.error(`❌ API Error: ${error.config?.method?.toUpperCase()} ${error.config?.url} - ${error.response?.status}`);
+        if (error.response) {
+            console.error(`❌ API Error: ${error.config.method?.toUpperCase()} ${error.config.url} - ${error.response.status}`);
+        } else {
+            console.error(`❌ Network Error: ${error.message}`);
+        }
         return Promise.reject(error);
     }
 );
 
 export default client;
-

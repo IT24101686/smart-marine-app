@@ -23,6 +23,7 @@ import EarningsScreen from './src/screens/EarningsScreen';
 import NotificationScreen from './src/screens/NotificationScreen';
 import CartScreen from './src/screens/CartScreen';
 import WelcomeScreen from './src/screens/WelcomeScreen';
+import TripHistoryScreen from './src/screens/TripHistoryScreen';
 
 
 
@@ -57,6 +58,7 @@ export default function App() {
           <Stack.Screen name="Earnings" component={EarningsScreen} />
           <Stack.Screen name="Notifications" component={NotificationScreen} />
           <Stack.Screen name="Cart" component={CartScreen} />
+          <Stack.Screen name="TripHistory" component={TripHistoryScreen} />
         </Stack.Navigator>
 
 

@@ -22,6 +22,11 @@ const vesselSchema = new mongoose.Schema({
         enum: ['per-day', 'per-trip', 'none'], 
         default: 'none' 
     },
+    rentalPaymentTerm: {
+        type: String,
+        enum: ['upfront', 'after-trip'],
+        default: 'after-trip'
+    },
     status: { 
         type: String, 
         enum: ['available', 'in-sea', 'rented', 'maintenance', 'service-due'], 

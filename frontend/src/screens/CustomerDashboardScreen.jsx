@@ -33,10 +33,10 @@ const CustomerDashboardScreen = ({ navigation }) => {
     const [cart, setCart] = useState([]);
     const [buyerPricesMap, setBuyerPricesMap] = useState({}); // { buyerId: [prices] }
     const [recentOrders, setRecentOrders] = useState([]);
-
+    const [myRentedVessels, setMyRentedVessels] = useState([]);
+    const [myTrips, setMyTrips] = useState([]);
 
     const fishTypes = ['All', 'Tuna (කෙලවල්ලා)', 'Skipjack (බලයා)', 'Marlin (කොප්පරා)', 'Mullet (මෝරා)'];
-
 
     useEffect(() => {
         loadUserAndCatches();
@@ -48,6 +48,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
                 fetchAvailableCatches(user.district);
                 fetchRecentOrders();
                 fetchCart();
+                fetchMyRentedVessels();
+                fetchMyTrips();
             }
             return () => { };
         }, [user])
@@ -62,6 +64,8 @@ const CustomerDashboardScreen = ({ navigation }) => {
                 fetchAvailableCatches(parsedUser.district);
                 fetchRecentOrders();
                 fetchCart();
+                fetchMyRentedVessels();
+                fetchMyTrips();
             } else {
                 fetchAvailableCatches('Galle');
             }
@@ -70,6 +74,24 @@ const CustomerDashboardScreen = ({ navigation }) => {
             console.error(error);
         } finally {
             setLoading(false);
+        }
+    };
+
+    const fetchMyRentedVessels = async () => {
+        try {
+            const res = await client.get('/api/vessels/my-vessels');
+            setMyRentedVessels(res.data);
+        } catch (e) {
+            console.warn('Could not fetch rented vessels:', e.message);
+        }
+    };
+
+    const fetchMyTrips = async () => {
+        try {
+            const res = await client.get('/api/trips/my-trips');
+            setMyTrips(res.data.filter(t => t.status === 'planned' || t.status === 'ongoing'));
+        } catch (e) {
+            console.warn('Could not fetch my trips:', e.message);
         }
     };
 
@@ -430,6 +452,93 @@ const CustomerDashboardScreen = ({ navigation }) => {
                     )}
 
                     {renderHeroCarousel()}
+
+                    {/* ── My Active Trips (New Section) ── */}
+                    {myTrips.length > 0 && (
+                        <View style={styles.sectionWrapper}>
+                            <View style={styles.sectionHeaderRow}>
+                                <Text style={styles.sectionTitle}>My Active Trips</Text>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                                {myTrips.map((trip) => (
+                                    <TouchableOpacity 
+                                        key={trip._id} 
+                                        style={styles.tripMiniCard}
+                                        onPress={() => {
+                                            if (trip.status === 'ongoing') {
+                                                navigation.navigate('ActiveTrip', { tripId: trip._id });
+                                            } else {
+                                                navigation.navigate('ManageTrip', { tripId: trip._id });
+                                            }
+                                        }}
+                                    >
+                                        <View style={styles.tripMiniHeader}>
+                                            <Ionicons name="navigate-circle" size={24} color={trip.status === 'ongoing' ? "#ef4444" : "#3b82f6"} />
+                                            <Text style={styles.miniTripName}>{trip.vesselId?.name}</Text>
+                                        </View>
+                                        <Text style={styles.miniTripMeta}>{trip.crew?.length} fishermen • {trip.status.toUpperCase()}</Text>
+                                        <TouchableOpacity 
+                                            style={styles.manageBtn}
+                                            onPress={() => {
+                                                if (trip.status === 'ongoing') {
+                                                    navigation.navigate('ActiveTrip', { tripId: trip._id });
+                                                } else {
+                                                    navigation.navigate('ManageTrip', { tripId: trip._id });
+                                                }
+                                            }}
+                                        >
+                                            <Text style={styles.manageBtnText}>{trip.status === 'ongoing' ? 'View Live' : 'Manage'}</Text>
+                                            <Ionicons name="chevron-forward" size={14} color="#2563eb" />
+                                        </TouchableOpacity>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    )}
+                    
+                    {/* ── My Rented Boats (New Section) ── */}
+                    {myRentedVessels.length > 0 && (
+                        <View style={styles.sectionWrapper}>
+                            <View style={styles.sectionHeaderRow}>
+                                <Text style={styles.sectionTitle}>My Rented Boats</Text>
+                                <TouchableOpacity onPress={() => navigation.navigate('RentalDashboard')}>
+                                    <Text style={styles.viewAllText}>Rent More</Text>
+                                </TouchableOpacity>
+                            </View>
+                            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
+                                {myRentedVessels.map((vessel) => (
+                                    <TouchableOpacity 
+                                        key={vessel._id} 
+                                        style={styles.vesselMiniCard}
+                                        onPress={() => navigation.navigate('VesselDetails', { vesselId: vessel._id })}
+                                    >
+                                        <View style={styles.vesselImageWrapper}>
+                                            {vessel.image ? (
+                                                <Image source={{ uri: vessel.image }} style={styles.vesselImage} />
+                                            ) : (
+                                                <View style={styles.vesselPlaceholder}>
+                                                    <Ionicons name="boat" size={30} color="#64748b" />
+                                                </View>
+                                            )}
+                                            <View style={styles.vesselStatusBadge}>
+                                                <View style={styles.statusDot} />
+                                                <Text style={styles.statusText}>RENTED</Text>
+                                            </View>
+                                        </View>
+                                        <Text style={styles.vesselName} numberOfLines={1}>{vessel.name}</Text>
+                                        <Text style={styles.vesselLicense}>{vessel.licenseNumber}</Text>
+                                        <TouchableOpacity 
+                                            style={styles.actionBtn}
+                                            onPress={() => navigation.navigate('CreateTrip', { vessel })}
+                                        >
+                                            <Text style={styles.actionBtnText}>Plan Trip</Text>
+                                        </TouchableOpacity>
+                                    </TouchableOpacity>
+                                ))}
+                            </ScrollView>
+                        </View>
+                    )}
+
                     {renderMarketGrid()}
 
                     {availableCatches.length === 0 && (
@@ -847,6 +956,125 @@ const styles = StyleSheet.create({
         fontSize: 12,
         fontWeight: '800',
         color: '#22c55e',
+    },
+    // Rented Vessel Card Styles
+    vesselMiniCard: {
+        backgroundColor: '#fff',
+        borderRadius: 24,
+        width: 180,
+        marginRight: 16,
+        padding: 12,
+        borderWidth: 1,
+        borderColor: '#e2e8f0',
+        elevation: 4,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+    },
+    vesselImageWrapper: {
+        width: '100%',
+        height: 100,
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: '#f1f5f9',
+        marginBottom: 10,
+    },
+    vesselImage: {
+        width: '100%',
+        height: '100%',
+        resizeMode: 'cover',
+    },
+    vesselPlaceholder: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    vesselStatusBadge: {
+        position: 'absolute',
+        top: 8,
+        right: 8,
+        backgroundColor: 'rgba(15, 23, 42, 0.8)',
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 8,
+        gap: 4,
+    },
+    statusDot: {
+        width: 6,
+        height: 6,
+        borderRadius: 3,
+        backgroundColor: '#10b981',
+    },
+    statusText: {
+        color: '#fff',
+        fontSize: 8,
+        fontWeight: '900',
+    },
+    vesselName: {
+        fontSize: 14,
+        fontWeight: '800',
+        color: '#1e293b',
+    },
+    vesselLicense: {
+        fontSize: 11,
+        color: '#64748b',
+        marginBottom: 10,
+    },
+    actionBtn: {
+        backgroundColor: '#2563eb',
+        paddingVertical: 8,
+        borderRadius: 10,
+        alignItems: 'center',
+    },
+    actionBtnText: {
+        color: '#fff',
+        fontSize: 12,
+        fontWeight: '800',
+    },
+    // Trip Mini Card Styles
+    tripMiniCard: {
+        backgroundColor: '#fff',
+        width: 220,
+        borderRadius: 24,
+        padding: 16,
+        marginRight: 15,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 10,
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: '#f1f5f9'
+    },
+    tripMiniHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        marginBottom: 5
+    },
+    miniTripName: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#1e293b'
+    },
+    miniTripMeta: {
+        fontSize: 11,
+        color: '#64748b',
+        fontWeight: '600'
+    },
+    manageBtn: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginTop: 12,
+        gap: 4
+    },
+    manageBtnText: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#2563eb'
     },
 });
 

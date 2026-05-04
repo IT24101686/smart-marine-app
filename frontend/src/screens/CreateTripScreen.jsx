@@ -18,24 +18,27 @@ import client from '../api/client';
 
 const CreateTripScreen = ({ route, navigation }) => {
     const vesselIdFromParams = route.params?.vesselId;
+    const isEditing = route.params?.isEditing;
+    const editingTrip = route.params?.trip;
+
     const [loading, setLoading] = useState(false);
     const [vessels, setVessels] = useState([]);
     const [selectedVessel, setSelectedVessel] = useState(null);
-    const [maxCrew, setMaxCrew] = useState('5');
-    const [minCrew, setMinCrew] = useState('3');
-    const [departureDate, setDepartureDate] = useState(new Date());
+    const [maxCrew, setMaxCrew] = useState(editingTrip?.maxFishermen?.toString() || '5');
+    const [minCrew, setMinCrew] = useState(editingTrip?.minFishermen?.toString() || '3');
+    const [departureDate, setDepartureDate] = useState(editingTrip?.departureTime ? new Date(editingTrip.departureTime) : new Date());
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [notes, setNotes] = useState('');
-    const [plannedDuration, setPlannedDuration] = useState('3 Days');
+    const [notes, setNotes] = useState(editingTrip?.notes || '');
+    const [plannedDuration, setPlannedDuration] = useState(editingTrip?.plannedDuration || '3 Days');
 
     // Cost States
-    const [fuelCost, setFuelCost] = useState('');
-    const [foodCost, setFoodCost] = useState('');
-    const [baitCost, setBaitCost] = useState('');
+    const [fuelCost, setFuelCost] = useState(editingTrip?.fuelCost?.toString() || '');
+    const [foodCost, setFoodCost] = useState(editingTrip?.foodCost?.toString() || '');
+    const [baitCost, setBaitCost] = useState(editingTrip?.baitCost?.toString() || '');
 
     useEffect(() => {
         fetchVessels();
-    }, []);
+    }, [editingTrip]);
 
     const fetchVessels = async () => {
         try {
@@ -43,7 +46,10 @@ const CreateTripScreen = ({ route, navigation }) => {
             const vesselList = response.data;
             setVessels(vesselList);
 
-            if (vesselIdFromParams) {
+            if (editingTrip) {
+                const found = vesselList.find(v => v._id === editingTrip.vesselId?._id || v._id === editingTrip.vesselId);
+                if (found) setSelectedVessel(found);
+            } else if (vesselIdFromParams) {
                 const found = vesselList.find(v => v._id === vesselIdFromParams);
                 if (found) setSelectedVessel(found);
             } else if (vesselList.length > 0) {
@@ -55,7 +61,7 @@ const CreateTripScreen = ({ route, navigation }) => {
         }
     };
 
-    const handleCreateTrip = async () => {
+    const handleSubmit = async () => {
         if (!selectedVessel) {
             Alert.alert("Error", "Please select a vessel first");
             return;
@@ -63,24 +69,31 @@ const CreateTripScreen = ({ route, navigation }) => {
 
         setLoading(true);
         try {
-            await client.post('/api/trips', {
+            const payload = {
                 vesselId: selectedVessel._id,
                 maxFishermen: parseInt(maxCrew),
                 minFishermen: parseInt(minCrew),
                 departureTime: departureDate,
                 plannedDuration,
                 notes,
-                tripType: 'direct',
+                tripType: editingTrip?.tripType || 'direct',
                 fuelCost: parseFloat(fuelCost) || 0,
                 foodCost: parseFloat(foodCost) || 0,
                 baitCost: parseFloat(baitCost) || 0
-            });
+            };
 
-            Alert.alert("Success", "Trip planned successfully!");
+            if (isEditing) {
+                await client.put(`/api/trips/${editingTrip._id}`, payload);
+                Alert.alert("Success", "Trip updated successfully!");
+            } else {
+                await client.post('/api/trips', payload);
+                Alert.alert("Success", "Trip planned successfully!");
+            }
+            
             navigation.goBack();
         } catch (error) {
             console.error(error);
-            Alert.alert("Error", "Failed to create trip");
+            Alert.alert("Error", `Failed to ${isEditing ? 'update' : 'create'} trip`);
         } finally {
             setLoading(false);
         }
@@ -100,7 +113,7 @@ const CreateTripScreen = ({ route, navigation }) => {
                         <TouchableOpacity onPress={() => navigation.goBack()}>
                             <Ionicons name="arrow-back" size={28} color="#fff" />
                         </TouchableOpacity>
-                        <Text style={styles.headerTitle}>Plan New Trip</Text>
+                        <Text style={styles.headerTitle}>{isEditing ? 'Edit Trip Plan' : 'Plan New Trip'}</Text>
                         <View style={{ width: 28 }} />
                     </View>
                 </SafeAreaView>
@@ -136,49 +149,46 @@ const CreateTripScreen = ({ route, navigation }) => {
                         <View style={{ flex: 1, marginRight: 10 }}>
                             <Text style={styles.label}>Min Crew</Text>
                             <View style={styles.inputBox}>
-                                <TextInput style={styles.flexInput} value={minCrew} onChangeText={setMinCrew} keyboardType="numeric" />
+                                <TextInput style={styles.flexInput} value={minCrew} onChangeText={setMinCrew} keyboardType="numeric" placeholder="3" />
                             </View>
                         </View>
                         <View style={{ flex: 1 }}>
                             <Text style={styles.label}>Max Crew</Text>
                             <View style={styles.inputBox}>
-                                <TextInput style={styles.flexInput} value={maxCrew} onChangeText={setMaxCrew} keyboardType="numeric" />
+                                <TextInput style={styles.flexInput} value={maxCrew} onChangeText={setMaxCrew} keyboardType="numeric" placeholder="5" />
                             </View>
                         </View>
                     </View>
 
                     <Text style={styles.label}>Planned Duration</Text>
                     <View style={styles.inputBox}>
-                        <TextInput style={styles.flexInput} value={plannedDuration} onChangeText={setPlannedDuration} />
+                        <TextInput style={styles.flexInput} value={plannedDuration} onChangeText={setPlannedDuration} placeholder="e.g. 3 Days" />
                     </View>
 
-                    {/* Operational Costs Section */}
-                    <Text style={[styles.label, { color: '#2563eb', marginTop: 25 }]}>Estimated Operational Costs (LKR)</Text>
+                    <Text style={styles.label}>Estimated Costs (LKR)</Text>
                     <View style={styles.row}>
-                        <View style={{ flex: 1, marginRight: 10 }}>
-                            <Text style={styles.subLabel}>Fuel Cost</Text>
-                            <View style={styles.inputBox}>
-                                <TextInput style={styles.flexInput} value={fuelCost} onChangeText={setFuelCost} keyboardType="numeric" placeholder="e.g. 50000" />
-                            </View>
+                        <View style={{ flex: 1, marginRight: 5 }}>
+                            <Text style={styles.subLabel}>Fuel</Text>
+                            <TextInput style={styles.inputBox} value={fuelCost} onChangeText={setFuelCost} keyboardType="numeric" placeholder="0" />
                         </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.subLabel}>Food/Ice Cost</Text>
-                            <View style={styles.inputBox}>
-                                <TextInput style={styles.flexInput} value={foodCost} onChangeText={setFoodCost} keyboardType="numeric" placeholder="e.g. 20000" />
-                            </View>
+                        <View style={{ flex: 1, marginHorizontal: 5 }}>
+                            <Text style={styles.subLabel}>Food</Text>
+                            <TextInput style={styles.inputBox} value={foodCost} onChangeText={setFoodCost} keyboardType="numeric" placeholder="0" />
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 5 }}>
+                            <Text style={styles.subLabel}>Bait</Text>
+                            <TextInput style={styles.inputBox} value={baitCost} onChangeText={setBaitCost} keyboardType="numeric" placeholder="0" />
                         </View>
                     </View>
-                    <Text style={styles.subLabel}>Bait/Other Costs</Text>
-                    <View style={styles.inputBox}>
-                        <TextInput style={styles.flexInput} value={baitCost} onChangeText={setBaitCost} keyboardType="numeric" placeholder="e.g. 10000" />
+
+                    <Text style={styles.label}>Additional Notes</Text>
+                    <View style={[styles.inputBox, styles.textArea]}>
+                        <TextInput style={styles.flexInput} value={notes} onChangeText={setNotes} placeholder="Any special instructions..." multiline />
                     </View>
 
-                    <Text style={styles.label}>Notes</Text>
-                    <TextInput style={[styles.inputBox, styles.textArea]} value={notes} onChangeText={setNotes} multiline numberOfLines={4} />
-
-                    <TouchableOpacity style={styles.submitButton} onPress={handleCreateTrip} disabled={loading}>
-                        <LinearGradient colors={['#2563eb', '#1d4ed8']} style={styles.buttonGradient}>
-                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Post Trip Request</Text>}
+                    <TouchableOpacity style={styles.submitButton} onPress={handleSubmit} disabled={loading}>
+                        <LinearGradient colors={['#2563eb', '#1e40af']} style={styles.buttonGradient}>
+                            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>{isEditing ? 'Update Plan' : 'Start Planning'}</Text>}
                         </LinearGradient>
                     </TouchableOpacity>
                 </View>
